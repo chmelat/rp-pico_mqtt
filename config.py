@@ -24,7 +24,7 @@ DISPLAY_SENSOR = 0  # index senzoru pro zobrazení na displeji (0 = první)
 ADC_ADDRESS = 0x48  # I2C adresa ADS1115 (0x48-0x4B podle ADDR pinu)
 ADC_GAIN = 4        # ±1.024 V
 ADC_RATE = 3        # 64 SPS
-ADC_SAMPLES = 3     # počet vzorků pro průměrování (burst averaging)
+ADC_SAMPLES = 5     # počet vzorků pro medián (volit liché číslo!)
 
 # Interval měření [s]
 INTERVAL_S = 1

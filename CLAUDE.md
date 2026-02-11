@@ -63,7 +63,7 @@ SENSORS = [
 - **SharedResources**: Manages shared hardware (display, wlan, i2c, adc, mqtt, wdt)
   - `safe_sleep_ms()`: All sleeps feed watchdog in chunks of `WDT_TIMEOUT_MS // 2`
   - `_init_adc()`: I2C + ADS1115 initialization with exponential backoff (1s → 60s max), includes I2C scan to verify device presence
-  - `read_adc_channel(channel)`: Returns `(raw, error)`, triggers re-init on `OSError`
+  - `read_adc_channel(channel)`: Returns `(raw, error)`, median filter over `ADC_SAMPLES` readings (use odd number), triggers re-init on `OSError`
   - `connect_wifi()`, `connect_mqtt()`: With exponential backoff
   - `publish(topic, value)`: Publishes to specified topic with retain
   - `show_value()`: Display with adaptive precision, shows "----" for out-of-range

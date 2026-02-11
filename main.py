@@ -143,22 +143,21 @@ class SharedResources:
             if self.adc is None:
                 return None, ERR_ADC
         samples = config.ADC_SAMPLES
-        total = 0
-        count = 0
+        vals = []
         for i in range(samples):
             try:
                 raw = self.adc.read(config.ADC_RATE, channel)
-                total += raw
-                count += 1
+                vals.append(raw)
             except OSError as e:
                 print("ADC error:", e)
                 self.adc = None
                 break
             if i % 10 == 9 and self.wdt:
                 self.wdt.feed()
-        if count == 0:
+        if not vals:
             return None, ERR_ADC
-        return total // count, None
+        vals.sort()
+        return vals[len(vals) // 2], None
 
     def _close_mqtt(self):
         """Uzavření MQTT spojení a uvolnění socketu"""

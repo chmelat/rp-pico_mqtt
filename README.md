@@ -233,6 +233,7 @@ Veškeré parametry jsou v souboru `config.py`.
 | `ADC_ADDRESS` | `0x48` | I2C adresa ADS1115 (viz tabulka níže) |
 | `ADC_GAIN` | `4` | Gain ADS1115 (viz tabulka níže) |
 | `ADC_RATE` | `0` | Rychlost vzorkování (viz tabulka níže) |
+| `ADC_SAMPLES` | `5` | Počet vzorků pro mediánový filtr (volit liché číslo!) |
 
 **Adresa ADS1115** (podle zapojení ADDR pinu):
 
