@@ -1,0 +1,6 @@
+*.py~
+*.pdf
+.mypy_cache/
+.ruff_cache/
+.tags_root
+pirani-kalibrace/
