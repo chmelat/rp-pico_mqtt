@@ -178,20 +178,24 @@ class SharedResources:
             return False
 
         try:
-            self.mqtt = MQTTClient(config.MQTT_CLIENT_ID,
-                                   config.MQTT_BROKER,
-                                   config.MQTT_PORT,
-                                   keepalive=config.MQTT_KEEPALIVE)
-            self.mqtt.set_last_will(config.MQTT_STATUS_TOPIC,
-                                    "offline", retain=True)
-            self.mqtt.connect()
-            self.mqtt.publish(config.MQTT_STATUS_TOPIC, "online", retain=True)
+            client = MQTTClient(config.MQTT_CLIENT_ID,
+                                config.MQTT_BROKER,
+                                config.MQTT_PORT,
+                                keepalive=config.MQTT_KEEPALIVE)
+            client.set_last_will(config.MQTT_STATUS_TOPIC,
+                                 "offline", retain=True)
+            client.connect()
+            client.publish(config.MQTT_STATUS_TOPIC, "online", retain=True)
+            self.mqtt = client
             self._mqtt_backoff = 1000
             self._mqtt_last_ping = time.ticks_ms()
             return True
         except OSError as e:
             print("MQTT error:", e)
-            self._close_mqtt()
+            try:
+                client.disconnect()
+            except Exception:
+                pass
             self._mqtt_next_try = time.ticks_add(now, self._mqtt_backoff)
             self._mqtt_backoff = min(self._mqtt_backoff * 2, 60_000)
             return False
@@ -355,7 +359,7 @@ class PiraniSensor(SensorChannel):
 
         try:
             pressure = math.exp(self.a + self.b * voltage + self.c * math.sqrt(voltage))
-        except OverflowError:
+        except (OverflowError, ValueError):
             return None, ERR_HI
 
         if pressure < self.p_min:
