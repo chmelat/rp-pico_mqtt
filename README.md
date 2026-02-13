@@ -156,11 +156,11 @@ mpremote connect /dev/ttyACM0 mip install github:mcauser/micropython-tm1637
 
 ### 4. Konfigurace
 
-Upravte `config.py` — vyplňte WiFi credentials, IP adresu MQTT brokeru a konfiguraci senzorů:
+Vytvořte `config.py` z šablony a vyplňte WiFi credentials, IP adresu MQTT brokeru a konfiguraci senzorů:
 
 ```bash
-cp config.py config.py.local
-# Upravte config.py.local s vašimi údaji
+cp config.py.example config.py
+# Upravte config.py s vašimi údaji
 ```
 
 ### 5. Nahrání aplikace
