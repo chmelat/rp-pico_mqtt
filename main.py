@@ -118,6 +118,9 @@ class SharedResources:
     def check_wifi(self):
         """Kontrola Wi-Fi připojení"""
         if self.wlan.isconnected():
+            if self._wifi_connecting:
+                self._mqtt_backoff = 1000
+                self._mqtt_next_try = 0
             self._wifi_connecting = False
             return True
         if self._wifi_connecting:
