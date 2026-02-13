@@ -75,6 +75,8 @@ class SharedResources:
         self._mqtt_next_try = 0
         self._mqtt_backoff = 1000
         self._mqtt_last_ping = 0
+        self._wifi_connecting = False
+        self._wifi_deadline = 0
 
     def safe_sleep_ms(self, ms):
         """Sleep s krmením watchdogu"""
@@ -103,9 +105,26 @@ class SharedResources:
             print("WiFi CHYBA")
             return False
 
+    def start_wifi_reconnect(self):
+        """Zahájení non-blocking Wi-Fi reconnectu"""
+        if self._wifi_connecting:
+            return
+        self.wlan.active(True)
+        if not self.wlan.isconnected():
+            self.wlan.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
+            self._wifi_connecting = True
+            self._wifi_deadline = time.ticks_add(time.ticks_ms(), 10_000)
+
     def check_wifi(self):
         """Kontrola Wi-Fi připojení"""
-        return self.wlan.isconnected()
+        if self.wlan.isconnected():
+            self._wifi_connecting = False
+            return True
+        if self._wifi_connecting:
+            if time.ticks_diff(time.ticks_ms(), self._wifi_deadline) > 0:
+                print("WiFi CHYBA")
+                self._wifi_connecting = False
+        return False
 
     def _init_adc(self):
         """Inicializace ADC s exponenciálním backoffem"""
@@ -470,8 +489,7 @@ class SensorManager:
             wifi_ok = self.shared.check_wifi()
             if not wifi_ok:
                 self.shared._close_mqtt()
-                self.shared.connect_wifi()
-                wifi_ok = self.shared.check_wifi()
+                self.shared.start_wifi_reconnect()
 
             self._read_all()
 
