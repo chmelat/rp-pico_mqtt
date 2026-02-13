@@ -135,7 +135,7 @@ class SharedResources:
             self._adc_backoff = min(self._adc_backoff * 2, 60_000)
 
     def read_adc_channel(self, channel):
-        """Čtení raw hodnoty z ADC kanálu s průměrováním, vrací (raw, error)"""
+        """Čtení raw hodnoty z ADC kanálu s mediánovým filtrem, vrací (raw, error)"""
         if self.v_ref is None:
             return None, ERR_CFG
         if self.adc is None:
