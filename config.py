@@ -47,20 +47,19 @@ SENSORS = [
         "p_max": 120,    # [kPa]
         "precision": 3,  # počet desetinných míst pro MQTT
     },
-    # Příklad Pirani vakuometru (odkomentovat a upravit):
-    # {
-    #     "type": "pirani",            # Pirani vakuometr
-    #     "channel": 1,
-    #     "topic": "sensor/L200h/pirani",
-    #     "name": "Pirani",
-    #     # Regresní koeficienty: p = exp(a + b*u + c*sqrt(u)) [mbar]
-    #     "a": -6.435,
-    #     "b": 7.418,
-    #     "c": 2.536,
-    #     "u_min": 0.0,    # [V] min. napětí (pod = ERR_LO)
-    #     "u_max": 1.024,  # [V] max. napětí (nad = ERR_HI)
-    #     "p_min": 1e-4,   # [mbar] min. tlak (pod = ERR_LO)
-    #     "p_max": 1000.0, # [mbar] max. tlak (nad = ERR_HI)
-    #     "precision": 3,  # počet desetinných míst pro MQTT
-    # },
+    {
+        "type": "pirani",            # Pirani vakuometr
+        "channel": 1,
+        "topic": "sensor/L200h/pirani",
+        "name": "Pirani",
+        # Regresní koeficienty: p = exp(a + b*u + c*sqrt(u)) [mbar]
+        "a": -6.435,
+        "b": 7.418,
+        "c": 2.536,
+        "u_min": 0.0,    # [V] min. napětí (pod = ERR_LO)
+        "u_max": 1.024,  # [V] max. napětí (nad = ERR_HI)
+        "p_min": 1e-4,   # [mbar] min. tlak (pod = ERR_LO)
+        "p_max": 1000.0, # [mbar] max. tlak (nad = ERR_HI)
+        "precision": 3,  # počet desetinných míst pro MQTT
+    },
 ]

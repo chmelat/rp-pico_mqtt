@@ -191,6 +191,8 @@ class SharedResources:
             self._mqtt_last_ping = time.ticks_ms()
             return True
         except OSError as e:
+            # Jen OSError (síťové chyby) — jiné výjimky (MemoryError aj.)
+            # necháváme probublat do main(), WDT restartuje zařízení
             print("MQTT error:", e)
             try:
                 client.disconnect()
@@ -202,6 +204,9 @@ class SharedResources:
 
     def mqtt_ping(self):
         """Periodický MQTT ping pro udržení spojení"""
+        # Pozn.: umqtt.simple neověřuje PINGRESP — při half-open TCP
+        # (NAT expiry aj.) zůstane spojení "zombie". V LAN akceptovatelné;
+        # OSError z publish/ping detekuje většinu výpadků.
         if self.mqtt is None:
             return
         now = time.ticks_ms()
@@ -274,8 +279,7 @@ class SensorChannel:
             self.last_value, self.last_error = None, error
             return None, error
         value, error = self.convert_raw(raw)
-        self.last_value = value
-        self.last_error = error
+        self.last_value, self.last_error = value, error
         return value, error
 
     def publish(self):
@@ -315,6 +319,8 @@ class CurrentLoopSensor(SensorChannel):
     def convert_raw(self, raw):
         """Převod raw ADC hodnoty na tlak"""
         voltage = raw * self.shared.v_ref / 32767
+        if voltage < 0:
+            return None, ERR_LO
 
         if voltage < self.v_min * 0.8:
             return None, ERR_LO
@@ -351,6 +357,8 @@ class PiraniSensor(SensorChannel):
     def convert_raw(self, raw):
         """Převod raw ADC hodnoty na tlak přes regresní model"""
         voltage = raw * self.shared.v_ref / 32767
+        if voltage < 0:
+            return None, ERR_LO
 
         if voltage < self.u_min:
             return None, ERR_LO
@@ -359,7 +367,7 @@ class PiraniSensor(SensorChannel):
 
         try:
             pressure = math.exp(self.a + self.b * voltage + self.c * math.sqrt(voltage))
-        except (OverflowError, ValueError):
+        except OverflowError:
             return None, ERR_HI
 
         if pressure < self.p_min:
