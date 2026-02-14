@@ -9,6 +9,7 @@ from umqtt.simple import MQTTClient
 import network
 import time
 import math
+import gc
 import config
 
 # Napěťový rozsah podle gain
@@ -511,6 +512,7 @@ class SensorManager:
             elapsed = time.ticks_diff(time.ticks_ms(), loop_start)
             remaining = config.INTERVAL_S * 1000 - elapsed
             if remaining > 0:
+                gc.collect()
                 self.shared.safe_sleep_ms(remaining)
 
 
