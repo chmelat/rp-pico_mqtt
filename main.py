@@ -372,8 +372,9 @@ class PiraniSensor(SensorChannel):
         self.a = cfg["a"]
         self.b = cfg["b"]
         self.c = cfg["c"]
+        self.u_divider = cfg.get("u_divider", 1.0)
         self.u_min = cfg.get("u_min", 0.0)
-        self.u_max = cfg.get("u_max", shared.v_ref or 1.024)
+        self.u_max = cfg.get("u_max", shared.v_ref or 2.048)
         self.p_min = cfg.get("p_min", 1e-4)
         self.p_max = cfg.get("p_max", 1000.0)
 
@@ -389,7 +390,8 @@ class PiraniSensor(SensorChannel):
             return None, ERR_HI
 
         try:
-            pressure = math.exp(self.a + self.b * voltage + self.c * math.sqrt(voltage))
+            u_actual = voltage * self.u_divider
+            pressure = math.exp(self.a + self.b * u_actual + self.c * math.sqrt(u_actual))
         except OverflowError:
             return None, ERR_HI
 
