@@ -1,23 +1,23 @@
 # Wi-Fi
-WIFI_SSID = "tvoje_SSID"
-WIFI_PASSWORD = "tvoje_heslo"
+WIFI_SSID = "WIFI-UJP"
+WIFI_PASSWORD = "xxxx"
 
 # MQTT
-MQTT_BROKER = "192.168.1.x"
+MQTT_BROKER = "10.10.0.43"  # eth, zero@uni (pi5)
 MQTT_PORT = 1883
 MQTT_CLIENT_ID = "pico_L200h"
 MQTT_KEEPALIVE = 60          # [s] keepalive interval pro broker
 MQTT_STATUS_TOPIC = "sensor/L200h/status"  # LWT a online status
 
 # I2C piny
-I2C_ID = 0              # 0 = I2C0, 1 = I2C1
-I2C_SDA = 20
-I2C_SCL = 21
+I2C_ID = 1              # 0 = I2C0, 1 = I2C1
+I2C_SDA = 26
+I2C_SCL = 27
 I2C_FREQ = 400_000
 
 # Display
-TM_CLK = 2
-TM_DIO = 3
+TM_CLK = 3
+TM_DIO = 2
 DISPLAY_SENSOR = 0  # index senzoru pro zobrazení na displeji (0 = první)
 
 # Sdílené ADC nastavení

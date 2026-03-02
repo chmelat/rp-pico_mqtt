@@ -17,28 +17,26 @@ MicroPython senzorový systém pro Raspberry Pi Pico 2W. Podporuje **až 4 heter
 ```
 Senzor 1 (4-20 mA)              Senzor 2 (Pirani, 0-10V)
     │                               │
-    ├── bočník 50 Ohm ──→ GND       ├── dělič 1:10 ──→ GND
-    │       │                       │       │
-    │       └── ADS1115 CH0         │       └── ADS1115 CH1
-    │                               │
-    │                          (0-10V → 0-1V)
+    ├── bočník ~100 Ohm ──→ GND     ├── napěťový dělič ──→ GND
+    │       │                       │         │
+    │       └── ADS1115 CH0         │         └── ADS1115 CH1
     │
 ADS1115 I2C:
-    SDA ── GPIO 0
-    SCL ── GPIO 1
+    SDA ── GPIO 26
+    SCL ── GPIO 27
 
 TM1637 displej:
-    CLK ── GPIO 16
-    DIO ── GPIO 17
+    CLK ── GPIO 3
+    DIO ── GPIO 2
 ```
 
 ### Princip měření
 
 **Proudová smyčka 4-20 mA:** Proud prochází bočníkem, na kterém vzniká úbytek napětí:
-- 4 mA × 50 Ohm = 0.200 V (minimální hodnota)
-- 20 mA × 50 Ohm = 1.000 V (maximální hodnota)
+- 4 mA × 100 Ohm ≈ 0.400 V (minimální hodnota)
+- 20 mA × 100 Ohm ≈ 2.000 V (maximální hodnota)
 
-**Pirani vakuometr:** Výstup snímače je 0-10 V, ale ADC měří v rozsahu 0-1 V (gain=4, ±1.024 V). Proto je nutný napěťový dělič 1:10 (např. 9 kΩ + 1 kΩ). Naměřené napětí u [V] na ADC se převádí na tlak regresním modelem: `p = exp(a + b·u + c·√u)` [mbar], kde koeficienty a, b, c jsou fitovány na dělenou charakteristiku (tj. u = U_pirani / 10).
+**Pirani vakuometr:** Výstup snímače je typicky 0-10 V, ale ADC měří v omezeném rozsahu. Proto je nutný napěťový dělič. Naměřené napětí `u_meas` [V] za děličem se nejprve přepočítá: `u_actual = u_meas × u_divider`, kde `u_divider` je konfigurabilní koeficient děliče. Poté se tlak počítá regresním modelem: `p = exp(a + b·u_actual + c·√u_actual)` [mbar], kde koeficienty a, b, c jsou fitovány na hodnoty `u_actual` (tj. musí odpovídat zvolené hodnotě `u_divider`).
 
 Každý senzor má vlastní `convert_raw()` metodu pro převod ADC hodnoty na výstupní veličinu.
 
@@ -214,17 +212,19 @@ Veškeré parametry jsou v souboru `config.py`.
 | `MQTT_BROKER` | `"192.168.1.x"` | IP adresa MQTT brokeru |
 | `MQTT_PORT` | `1883` | Port MQTT brokeru |
 | `MQTT_CLIENT_ID` | `"pico_tlak"` | Identifikátor klienta |
+| `MQTT_KEEPALIVE` | `60` | Keepalive interval v sekundách |
+| `MQTT_STATUS_TOPIC` | `"sensor/.../status"` | Topic pro LWT a stav zařízení (online/offline) |
 
 ### Piny
 
 | Parametr | Výchozí | Popis |
 |----------|---------|-------|
-| `I2C_ID` | `0` | I2C sběrnice |
-| `I2C_SDA` | `0` | GPIO pin pro SDA |
-| `I2C_SCL` | `1` | GPIO pin pro SCL |
+| `I2C_ID` | `1` | I2C sběrnice (0 nebo 1) |
+| `I2C_SDA` | `26` | GPIO pin pro SDA |
+| `I2C_SCL` | `27` | GPIO pin pro SCL |
 | `I2C_FREQ` | `400000` | Frekvence I2C (Hz) |
-| `TM_CLK` | `16` | GPIO pin pro CLK displeje |
-| `TM_DIO` | `17` | GPIO pin pro DIO displeje |
+| `TM_CLK` | `3` | GPIO pin pro CLK displeje |
+| `TM_DIO` | `2` | GPIO pin pro DIO displeje |
 
 ### ADC (sdílené)
 
@@ -286,12 +286,14 @@ Při inicializaci se provede I2C scan a ověří se přítomnost zařízení na 
 
 Seznam senzorů se konfiguruje v poli `SENSORS`. Společné parametry:
 
-| Klíč | Popis |
-|------|-------|
-| `type` | Typ senzoru: `"current_loop"`, `"pirani"`, nebo vlastní |
-| `channel` | ADC kanál (0-3) |
-| `topic` | MQTT topic pro publikaci |
-| `name` | Název pro debug (volitelný) |
+| Klíč | Povinný | Popis |
+|------|---------|-------|
+| `type` | ano | Typ senzoru: `"current_loop"`, `"pirani"`, nebo vlastní |
+| `channel` | ano | ADC kanál (0-3) |
+| `topic` | ano | MQTT topic pro publikaci hodnoty |
+| `name` | ne | Název pro debug (výchozí: `"CH{channel}"`) |
+| `status_topic` | ne | MQTT topic pro stav senzoru (výchozí: `{topic}/status`) |
+| `precision` | ne | Počet desetinných míst pro MQTT (výchozí: 3) |
 
 **Parametry pro `current_loop`:**
 
@@ -310,10 +312,13 @@ Seznam senzorů se konfiguruje v poli `SENSORS`. Společné parametry:
 | `a` | - | Regresní koeficient a |
 | `b` | - | Regresní koeficient b |
 | `c` | - | Regresní koeficient c |
-| `u_min` | `0.0` | Minimální napětí (V), pod = ERR_LO |
-| `u_max` | `v_ref` | Maximální napětí (V), nad = ERR_HI |
+| `u_divider` | `1.0` | Koeficient děliče: `u_actual = u_meas × u_divider` |
+| `u_min` | `0.0` | Minimální změřené napětí za děličem (V), pod = ERR_LO |
+| `u_max` | `v_ref` | Maximální změřené napětí za děličem (V), nad = ERR_HI |
 | `p_min` | `1e-4` | Minimální tlak (mbar), pod = ERR_LO |
 | `p_max` | `1000.0` | Maximální tlak (mbar), nad = ERR_HI |
+
+> Regresní koeficienty musí být fitovány na hodnoty `u_actual` (tj. na napětí po přepočtu `u_divider`), ne na surové napětí z ADC.
 
 #### Příklad konfigurace
 
@@ -324,11 +329,12 @@ SENSORS = [
         "channel": 0,
         "topic": "sensor/tlak/pec1",
         "name": "Pec 1",
-        "r_bocnik": 50,
-        "i_min": 0.004,
-        "i_max": 0.020,
-        "p_min": 0,
-        "p_max": 120,
+        "r_bocnik": 99.1,     # [Ohm]
+        "i_min": 0.004,       # [A]
+        "i_max": 0.020,       # [A]
+        "p_min": 0,           # [kPa]
+        "p_max": 120,         # [kPa]
+        "precision": 3,
     },
     {
         "type": "pirani",
@@ -336,10 +342,14 @@ SENSORS = [
         "topic": "sensor/L200h/pirani",
         "name": "Pirani",
         "a": -6.435,
-        "b": 7.418,
-        "c": 2.536,
-        "p_min": 1e-4,
-        "p_max": 1000.0,
+        "b": 0.7418,
+        "c": 0.2536,
+        "u_divider": 5.009,   # koeficient děliče napětí
+        "u_min": 0.0,         # [V] za děličem
+        "u_max": 2.048,       # [V] za děličem
+        "p_min": 1e-4,        # [mbar]
+        "p_max": 1000.0,      # [mbar]
+        "precision": 3,
     },
 ]
 ```
@@ -369,25 +379,36 @@ SENSORS = [
 
 ## MQTT
 
-Hodnoty se publikují na topic definovaný pro každý senzor s příznakem `retain=True`.
+Každý senzor publikuje na **dvě témata** (`retain=True`):
 
-### Formát zpráv
+| Topic | Obsah | Kdy |
+|-------|-------|-----|
+| `topic` | Naměřená hodnota (číslo jako string, např. `"23.456"`) | Pouze při platné hodnotě |
+| `status_topic` | Stav senzoru | Vždy |
 
-- **Platná hodnota:** číslo jako string, např. `"23.456"` (3 desetinná místa)
-- **Chybový stav:** chybový kód jako string, např. `"E-Lo"`
+Stav senzoru (`status_topic`) je vždy přítomen a nabývá hodnot:
 
-Subscriber rozliší platnou hodnotu od chyby podle formátu — číslo = platná hodnota, `E-*` = chyba.
+| Hodnota | Význam |
+|---------|--------|
+| `"OK"` | Platná hodnota |
+| `"sensor_low"` | Napětí/hodnota pod rozsahem (ERR_LO) |
+| `"sensor_high"` | Napětí/hodnota nad rozsahem (ERR_HI) |
+| `"adc_error"` | Chyba ADC komunikace |
+| `"config_error"` | Neplatná konfigurace |
+
+Navíc se na `MQTT_STATUS_TOPIC` (LWT) publikuje stav zařízení: `"online"` při startu, `"offline"` při neočekávaném odpojení.
 
 ## Chybové kódy
 
-| Kód | Význam | Publikuje na MQTT |
-|-----|--------|-------------------|
-| `E--1` | Selhání WiFi připojení | Ne |
-| `E--2` | Selhání MQTT připojení | Ne |
-| `E-Lo` | Napětí/hodnota pod rozsahem (odpojený senzor) | Ano |
-| `E-Hi` | Napětí/hodnota nad rozsahem (zkrat/porucha) | Ano |
-| `E--3` | Chyba ADC (I2C komunikace) | Ano |
-| `E--4` | Neplatná konfigurace (ADC_GAIN, v_range=0) | Ano |
+| Kód | Význam | Zobrazí na displeji | Publikuje na MQTT |
+|-----|--------|---------------------|-------------------|
+| `E--1` | Selhání WiFi připojení | Ano | Ne |
+| `E--2` | Selhání MQTT připojení | Ano | Ne |
+| `E-Lo` | Napětí/hodnota pod rozsahem (odpojený senzor) | Ano | Ano (`sensor_low`) |
+| `E-Hi` | Napětí/hodnota nad rozsahem (zkrat/porucha) | Ano | Ano (`sensor_high`) |
+| `E--3` | Chyba ADC (I2C komunikace) | Ano | Ano (`adc_error`) |
+| `E--4` | Neplatná konfigurace (ADC_GAIN, v_range=0) | Ano | Ano (`config_error`) |
+| `E--5` | Fatální výjimka — zařízení čeká na WDT reset | Ano | Ne |
 
 ## Chování při chybách
 
@@ -399,8 +420,8 @@ Zařízení je navrženo pro nepřetržitý provoz. **Měření probíhá vždy*
 |-----------|---------------------|
 | **Displej** | Zařízení běží bez displeje, měří a publikuje normálně |
 | **ADC** | Automatická reinicializace s exponenciálním backoffem (1s → 60s) |
-| **MQTT** | Automatický reconnect s exponenciálním backoffem (1s → 60s), socket se korektně uvolňuje |
-| **WiFi** | Automatický reconnect při každém měřicím cyklu |
+| **MQTT** | Automatický reconnect s exponenciálním backoffem (1s → 60s), socket se korektně uvolňuje; periodický keepalive ping každých `MQTT_KEEPALIVE / 2` sekund |
+| **WiFi** | Non-blocking reconnect (max 10 s), zařízení měří a zobrazuje i při výpadku; po obnovení WiFi se resetuje MQTT backoff |
 
 ### Watchdog
 

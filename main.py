@@ -5,7 +5,7 @@
 from machine import I2C, Pin, WDT
 from ads1x15 import ADS1115
 import tm1637
-from umqtt.simple import MQTTClient
+from umqtt.simple import MQTTClient, MQTTException
 import network
 import time
 import math
@@ -200,6 +200,31 @@ class SharedResources:
         if time.ticks_diff(now, self._mqtt_next_try) < 0:
             return False
 
+        if self.wdt:
+            self.wdt.feed()
+
+        # TCP pre-test s timeoutom – predíde blokovaniu WDT pri nedostupnom brokeri
+        import usocket
+        try:
+            addr = usocket.getaddrinfo(config.MQTT_BROKER, config.MQTT_PORT)[0][-1]
+            s = usocket.socket()
+            try:
+                s.settimeout(4)
+                s.connect(addr)
+            finally:
+                try:
+                    s.close()
+                except OSError:
+                    pass
+        except OSError as e:
+            print("MQTT broker nedostupný:", e)
+            self._mqtt_next_try = time.ticks_add(now, self._mqtt_backoff)
+            self._mqtt_backoff = min(self._mqtt_backoff * 2, 60_000)
+            return False
+
+        if self.wdt:
+            self.wdt.feed()
+
         try:
             client = MQTTClient(config.MQTT_CLIENT_ID,
                                 config.MQTT_BROKER,
@@ -213,13 +238,13 @@ class SharedResources:
             self._mqtt_backoff = 1000
             self._mqtt_last_ping = time.ticks_ms()
             return True
-        except OSError as e:
-            # Jen OSError (síťové chyby) — jiné výjimky (MemoryError aj.)
-            # necháváme probublat do main(), WDT restartuje zařízení
+        except BaseException as e:
+            if isinstance(e, (MemoryError, KeyboardInterrupt, SystemExit)):
+                raise
             print("MQTT error:", e)
             try:
                 client.disconnect()
-            except Exception:
+            except BaseException:
                 pass
             self._mqtt_next_try = time.ticks_add(now, self._mqtt_backoff)
             self._mqtt_backoff = min(self._mqtt_backoff * 2, 60_000)
@@ -238,7 +263,7 @@ class SharedResources:
         try:
             self.mqtt.ping()
             self._mqtt_last_ping = now
-        except OSError:
+        except (OSError, MQTTException):
             self._close_mqtt()
 
     def publish(self, topic, payload, retain=True):
@@ -248,7 +273,7 @@ class SharedResources:
         try:
             self.mqtt.publish(topic, str(payload), retain=retain)
             return True
-        except OSError:
+        except (OSError, MQTTException):
             self._close_mqtt()
             return False
 
