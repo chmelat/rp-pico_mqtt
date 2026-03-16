@@ -339,13 +339,13 @@ class SensorChannel:
             status = ERR_MQTT_MSG.get(self.last_error, self.last_error)
         else:
             status = "OK"
-        if not self.shared.publish(self.status_topic, status):
+        if not self.shared.publish(self.status_topic, status, retain=False):
             ok = False
 
         # Hodnotu publikuj jen když je platná
         if self.last_value is not None:
             formatted = "{:.{}f}".format(self.last_value, self.precision)
-            if not self.shared.publish(self.topic, formatted):
+            if not self.shared.publish(self.topic, formatted, retain=False):
                 ok = False
 
         return ok
