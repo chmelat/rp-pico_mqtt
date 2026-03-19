@@ -1,6 +1,6 @@
 # Wi-Fi
-WIFI_SSID = "WIFI-UJP"
-WIFI_PASSWORD = "xxxx"
+WIFI_SSID = ""
+WIFI_PASSWORD = ""
 
 # MQTT
 MQTT_BROKER = "10.10.0.43"  # eth, zero@uni (pi5)
@@ -55,10 +55,10 @@ SENSORS = [
         # Regresní koeficienty: p = exp(a + b*u + c*sqrt(u)) [mbar], [u - 0-10V]
         "a": -6.435,
         "b": 0.7418,
-        "c": 0.2536,
+        "c": 0.8018,
         "u_divider": 5.009,  # koeficient děliče (u_actual = u_meas * u_divider)
         "u_min": 0.0,    # [V] min. změřené napětí za děličem (pod = ERR_LO)
-        "u_max": 2.048,  # [V] max. změřené napětí za děličem (nad = ERR_HI)
+        "u_max": 2.0,  # [V] max. změřené napětí za děličem (nad = ERR_HI)
         "p_min": 1e-4,   # [mbar] min. tlak (pod = ERR_LO)
         "p_max": 1000.0, # [mbar] max. tlak (nad = ERR_HI)
         "precision": 3,  # počet desetinných míst pro MQTT
