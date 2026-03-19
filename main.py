@@ -7,6 +7,7 @@ from ads1x15 import ADS1115
 import tm1637
 from umqtt.simple import MQTTClient, MQTTException
 import network
+import ntptime
 import time
 import math
 import gc
@@ -101,10 +102,19 @@ class SharedResources:
 
         if self.wlan.isconnected():
             print("WiFi OK:", self.wlan.ifconfig()[0])
+            self._sync_ntp()
             return True
         else:
             print("WiFi CHYBA")
             return False
+
+    def _sync_ntp(self):
+        """Synchronizace RTC přes NTP"""
+        try:
+            ntptime.settime()
+            print("NTP OK:", time.gmtime()[:6])
+        except Exception as e:
+            print("NTP CHYBA:", e)
 
     def start_wifi_reconnect(self):
         """Zahájení non-blocking Wi-Fi reconnectu"""
@@ -122,6 +132,7 @@ class SharedResources:
             if self._wifi_connecting:
                 self._mqtt_backoff = 1000
                 self._mqtt_next_try = 0
+                self._sync_ntp()
             self._wifi_connecting = False
             return True
         if self._wifi_connecting:
@@ -344,7 +355,10 @@ class SensorChannel:
 
         # Hodnotu publikuj jen když je platná
         if self.last_value is not None:
-            formatted = "{:.{}f}".format(self.last_value, self.precision)
+            t = time.gmtime()
+            ts = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(
+                t[0], t[1], t[2], t[3], t[4], t[5])
+            formatted = "{:.{}f} {}".format(self.last_value, self.precision, ts)
             if not self.shared.publish(self.topic, formatted, retain=False):
                 ok = False
 

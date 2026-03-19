@@ -1,0 +1,14 @@
+[Unit]
+Description=MQTT to PostgreSQL daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Lang/micropython/rp-pico_mqtt/postgres-push
+ExecStart=/usr/bin/python3 %h/Lang/micropython/rp-pico_mqtt/postgres-push/mqtt_to_postgres.py %h/Lang/micropython/rp-pico_mqtt/postgres-push/mqtt_push.cfg
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
