@@ -13,7 +13,7 @@ import math
 import gc
 import config
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -159,23 +159,22 @@ class SharedResources:
         self.wlan.active(True)
         self.wlan.config(pm=0xa11140)
         if not self.wlan.isconnected():
-            self.wlan.disconnect()
             self.wlan.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
             self._wifi_connecting = True
-            self._wifi_deadline = time.ticks_add(time.ticks_ms(), 30_000)
+            self._wifi_deadline = time.ticks_add(time.ticks_ms(), 90_000)
 
     def check_wifi(self):
         """Kontrola Wi-Fi připojení"""
         if self.wlan.isconnected():
             if self._wifi_connecting:
+                self._wifi_connecting = False
                 self._mqtt_backoff = 1000
                 self._mqtt_next_try = 0
                 self._sync_ntp()
-            self._wifi_connecting = False
             return True
         if self._wifi_connecting:
             if time.ticks_diff(time.ticks_ms(), self._wifi_deadline) > 0:
-                print("WiFi CHYBA")
+                print("WiFi deadline — nový pokus")
                 self._wifi_connecting = False
         return False
 
@@ -243,6 +242,8 @@ class SharedResources:
         """Připojení k MQTT brokeru s exponenciálním backoffem"""
         if self.mqtt is not None:
             return True
+        if not self.wlan.isconnected():
+            return False
 
         now = time.ticks_ms()
         if time.ticks_diff(now, self._mqtt_next_try) < 0:
@@ -605,7 +606,10 @@ class SensorManager:
 
             if wifi_ok:
                 self.shared.flush_buffer()
-                publish_ok = self._publish_all()
+
+            publish_ok = self._publish_all()
+
+            if wifi_ok:
                 if not publish_ok:
                     self._conn_error = ERR_MQTT
                 else:
