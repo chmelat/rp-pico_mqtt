@@ -13,7 +13,7 @@ import math
 import gc
 import config
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -112,6 +112,7 @@ class SharedResources:
         self._mqtt_last_ping = 0
         self._wifi_connecting = False
         self._wifi_deadline = 0
+        self._pub_buffer = []  # zásobník: [(topic, payload, retain), ...]
 
     def safe_sleep_ms(self, ms):
         """Sleep s krmením watchdogu"""
@@ -145,6 +146,7 @@ class SharedResources:
     def _sync_ntp(self):
         """Synchronizace RTC přes NTP"""
         try:
+            ntptime.timeout = 5
             ntptime.settime()
             print("NTP OK:", time.gmtime()[:6])
         except Exception as e:
@@ -155,10 +157,12 @@ class SharedResources:
         if self._wifi_connecting:
             return
         self.wlan.active(True)
+        self.wlan.config(pm=0xa11140)
         if not self.wlan.isconnected():
+            self.wlan.disconnect()
             self.wlan.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
             self._wifi_connecting = True
-            self._wifi_deadline = time.ticks_add(time.ticks_ms(), 10_000)
+            self._wifi_deadline = time.ticks_add(time.ticks_ms(), 30_000)
 
     def check_wifi(self):
         """Kontrola Wi-Fi připojení"""
@@ -321,6 +325,25 @@ class SharedResources:
             self._close_mqtt()
             return False
 
+    def flush_buffer(self):
+        """Odeslání zpráv ze zásobníku, nejstarší první"""
+        if not self._pub_buffer or not self.connect_mqtt():
+            return
+        sent = 0
+        while self._pub_buffer:
+            if self.wdt and sent % 10 == 0:
+                self.wdt.feed()
+            topic, payload, retain = self._pub_buffer[0]
+            try:
+                self.mqtt.publish(topic, payload, retain=retain)
+                self._pub_buffer.pop(0)
+                sent += 1
+            except (OSError, MQTTException):
+                self._close_mqtt()
+                break
+        if sent:
+            print("Zásobník: odesláno", sent, "zpráv, zbývá", len(self._pub_buffer))
+
     def show_value(self, value):
         """Zobrazení hodnoty na displeji"""
         if not self.display:
@@ -392,7 +415,11 @@ class SensorChannel:
             ts = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(
                 t[0], t[1], t[2], t[3], t[4], t[5])
             formatted = "{:.{}f} {}".format(self.last_value, self.precision, ts)
-            if not self.shared.publish(self.topic, formatted, retain=False):
+            if not self.shared.publish(self.topic, formatted, retain=True):
+                buf = self.shared._pub_buffer
+                if len(buf) >= config.PUBLISH_BUFFER_MAX:
+                    buf.pop(0)
+                buf.append((self.topic, formatted, True))
                 ok = False
 
         return ok
@@ -577,6 +604,7 @@ class SensorManager:
             self._read_all()
 
             if wifi_ok:
+                self.shared.flush_buffer()
                 publish_ok = self._publish_all()
                 if not publish_ok:
                     self._conn_error = ERR_MQTT

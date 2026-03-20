@@ -32,6 +32,9 @@ INTERVAL_S = 1
 # Watchdog timeout [ms]
 WDT_TIMEOUT_MS = 8000
 
+# Max počet zpráv v zásobníku pro neodeslané MQTT hodnoty
+PUBLISH_BUFFER_MAX = 200
+
 # Seznam senzorů s per-senzor konfigurací
 SENSORS = [
     {
