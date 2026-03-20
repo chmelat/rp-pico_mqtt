@@ -281,6 +281,7 @@ Při inicializaci se provede I2C scan a ověří se přítomnost zařízení na 
 |----------|---------|-------|
 | `INTERVAL_S` | `1` | Interval měření v sekundách |
 | `WDT_TIMEOUT_MS` | `8000` | Timeout watchdogu v ms |
+| `PUBLISH_BUFFER_MAX` | `200` | Max. počet hodnot v zásobníku pro případ výpadku WiFi/MQTT |
 
 ### Senzory (SENSORS)
 
@@ -379,12 +380,12 @@ SENSORS = [
 
 ## MQTT
 
-Každý senzor publikuje na **dvě témata** (`retain=True`):
+Každý senzor publikuje na **dvě témata**:
 
-| Topic | Obsah | Kdy |
-|-------|-------|-----|
-| `topic` | Naměřená hodnota (číslo jako string, např. `"23.456"`) | Pouze při platné hodnotě |
-| `status_topic` | Stav senzoru | Vždy |
+| Topic | Obsah | retain | Kdy |
+|-------|-------|--------|-----|
+| `topic` | Hodnota + timestamp CET/CEST, např. `"23.456 2024-01-15T14:30:00"` | True | Pouze při platné hodnotě |
+| `status_topic` | Stav senzoru | False | Vždy |
 
 Stav senzoru (`status_topic`) je vždy přítomen a nabývá hodnot:
 
@@ -396,7 +397,9 @@ Stav senzoru (`status_topic`) je vždy přítomen a nabývá hodnot:
 | `"adc_error"` | Chyba ADC komunikace |
 | `"config_error"` | Neplatná konfigurace |
 
-Navíc se na `MQTT_STATUS_TOPIC` (LWT) publikuje stav zařízení: `"online"` při startu, `"offline"` při neočekávaném odpojení.
+Navíc se na `MQTT_STATUS_TOPIC` (LWT, `retain=True`) publikuje stav zařízení: `"online"` při startu, `"offline"` při neočekávaném odpojení.
+
+Timestamp v hodnotovém topicu odpovídá **středoevropskému času** (CET/CEST) s automatickým přepínáním letního/zimního času (poslední neděle v březnu/říjnu).
 
 ## Chybové kódy
 
@@ -420,8 +423,8 @@ Zařízení je navrženo pro nepřetržitý provoz. **Měření probíhá vždy*
 |-----------|---------------------|
 | **Displej** | Zařízení běží bez displeje, měří a publikuje normálně |
 | **ADC** | Automatická reinicializace s exponenciálním backoffem (1s → 60s) |
-| **MQTT** | Automatický reconnect s exponenciálním backoffem (1s → 60s), socket se korektně uvolňuje; periodický keepalive ping každých `MQTT_KEEPALIVE / 2` sekund |
-| **WiFi** | Non-blocking reconnect (max 10 s), zařízení měří a zobrazuje i při výpadku; po obnovení WiFi se resetuje MQTT backoff |
+| **MQTT** | Automatický reconnect s exponenciálním backoffem (1s → 60s); periodický ping každých `MQTT_KEEPALIVE / 2` sekund s ověřením PINGRESP (2s timeout) — detekuje zombie TCP spojení; hodnoty naměřené během výpadku se ukládají do zásobníku (max `PUBLISH_BUFFER_MAX` položek) a po reconnectu se odešlou |
+| **WiFi** | Non-blocking reconnect (deadline 90s), zařízení měří a zobrazuje i při výpadku; po obnovení WiFi se resetuje MQTT backoff a synchronizuje NTP |
 
 ### Watchdog
 
