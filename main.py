@@ -13,7 +13,7 @@ import math
 import gc
 import config
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -125,6 +125,7 @@ class SharedResources:
     def connect_wifi(self):
         """Připojení k Wi-Fi"""
         self.wlan.active(True)
+        self.wlan.config(pm=0xa11140)  # zakázat power management CYW43 (prevence deauth od AP)
         if not self.wlan.isconnected():
             self.wlan.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
 
