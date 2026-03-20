@@ -13,7 +13,7 @@ import math
 import gc
 import config
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -282,6 +282,7 @@ class SharedResources:
             client.set_last_will(config.MQTT_STATUS_TOPIC,
                                  "offline", retain=True)
             client.connect()
+            client.sock.settimeout(2)
             client.publish(config.MQTT_STATUS_TOPIC, "online", retain=True)
             self.mqtt = client
             self._mqtt_backoff = 1000
@@ -300,17 +301,17 @@ class SharedResources:
             return False
 
     def mqtt_ping(self):
-        """Periodický MQTT ping pro udržení spojení"""
-        # Pozn.: umqtt.simple neověřuje PINGRESP — při half-open TCP
-        # (NAT expiry aj.) zůstane spojení "zombie". V LAN akceptovatelné;
-        # OSError z publish/ping detekuje většinu výpadků.
+        """Periodický MQTT ping s ověřením PINGRESP — detekuje zombie spojení"""
         if self.mqtt is None:
             return
         now = time.ticks_ms()
         if time.ticks_diff(now, self._mqtt_last_ping) < config.MQTT_KEEPALIVE * 500:
             return
+        if self.wdt:
+            self.wdt.feed()
         try:
             self.mqtt.ping()
+            self.mqtt.check_msg()    # čte PINGRESP; socket timeout 2s → OSError při zombie
             self._mqtt_last_ping = now
         except (OSError, MQTTException):
             self._close_mqtt()
