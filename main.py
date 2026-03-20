@@ -13,6 +13,8 @@ import math
 import gc
 import config
 
+VERSION = "1.0.0"
+
 # Napěťový rozsah podle gain
 GAIN_VREF = {
     1: 4.096,
@@ -40,18 +42,49 @@ ERR_MQTT_MSG = {
 }
 
 
+def _last_sunday(year, month):
+    """Vrátí den v měsíci poslední neděle daného měsíce."""
+    days_in_month = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if month == 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
+        last = 29
+    else:
+        last = days_in_month[month]
+    t = time.gmtime(time.mktime((year, month, last, 0, 0, 0, 0, 0)))
+    # weekday: 0=Po, 6=Ne
+    return last - (t[6] + 1) % 7
+
+
+def cet_offset(t):
+    """Vrátí UTC offset v sekundách: 7200 (CEST, léto) nebo 3600 (CET, zima)."""
+    year, month, day, hour = t[0], t[1], t[2], t[3]
+    if month < 3 or month > 10:
+        return 3600
+    if 3 < month < 10:
+        return 7200
+    ls = _last_sunday(year, month)
+    if month == 3:
+        return 7200 if (day > ls or (day == ls and hour >= 1)) else 3600
+    else:  # říjen
+        return 3600 if (day > ls or (day == ls and hour >= 1)) else 7200
+
+
 class SharedResources:
     """Sdílené zdroje pro všechny senzory"""
 
     def __init__(self):
         self.wdt = None
         self.v_ref = GAIN_VREF.get(config.ADC_GAIN)
+        t = time.gmtime()
+        self.utc_offset = cet_offset(t)
+        self._offset_day = t[2]
 
         # Display jako první - pro zobrazení chyb při inicializaci
         try:
             self.display = tm1637.TM1637Decimal(clk=Pin(config.TM_CLK),
                                                 dio=Pin(config.TM_DIO))
             self.display.brightness(7)
+            self.display.show(VERSION)
+            time.sleep_ms(2000)
         except Exception as e:
             print("Display init error:", e)
             self.display = None
@@ -354,7 +387,7 @@ class SensorChannel:
 
         # Hodnotu publikuj jen když je platná
         if self.last_value is not None:
-            t = time.gmtime()
+            t = time.gmtime(time.mktime(time.gmtime()) + self.shared.utc_offset)
             ts = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(
                 t[0], t[1], t[2], t[3], t[4], t[5])
             formatted = "{:.{}f} {}".format(self.last_value, self.precision, ts)
@@ -529,6 +562,11 @@ class SensorManager:
         while True:
             self.shared.wdt.feed()
             loop_start = time.ticks_ms()
+
+            t = time.gmtime()
+            if t[3] >= 1 and t[2] != self.shared._offset_day:
+                self.shared.utc_offset = cet_offset(t)
+                self.shared._offset_day = t[2]
 
             wifi_ok = self.shared.check_wifi()
             if not wifi_ok:
