@@ -186,31 +186,44 @@ za předpokladu, že DB je dostupná a timeout 10 s je dostatečný.
 
 ## Provoz jako systemd service
 
-Soubor `mqtt-to-postgres.service` v tomto adresáři je připraven pro **user service**
-(běží pod uživatelem, který jej nainstaluje — `User=` se neuvádí, cesta se odvozuje
-přes `%h`).
+Soubor `mqtt-to-postgres.service` v tomto adresáři je **system service** — běží
+nezávisle na přihlášeném uživateli. Systemd vytvoří izolovaného dynamického
+uživatele automaticky (`DynamicUser=yes`).
 
-### Instalace
+Skript se spouští z `/usr/local/bin`, konfigurační soubor se čte z `/usr/local/etc`.
+
+> **Poznámka:** Daemon záměrně neběží pod rootem — přijímá data ze sítě a připojuje
+> se k DB, takže root by zbytečně zvětšoval attack surface. `DynamicUser=yes` je
+> pro tento účel doporučený přístup.
+
+### Instalace souborů
 
 ```bash
-mkdir -p ~/.config/systemd/user/
-cp mqtt-to-postgres.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now mqtt-to-postgres
+sudo cp mqtt_to_postgres.py /usr/local/bin/
+sudo cp mqtt_push.cfg /usr/local/etc/
+sudo chmod 644 /usr/local/etc/mqtt_push.cfg   # čitelné pro dynamického uživatele
+```
+
+### Instalace service
+
+```bash
+sudo cp mqtt-to-postgres.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mqtt-to-postgres
 ```
 
 ### Správa
 
 ```bash
-systemctl --user status mqtt-to-postgres
-systemctl --user restart mqtt-to-postgres
-systemctl --user stop mqtt-to-postgres
+sudo systemctl status mqtt-to-postgres
+sudo systemctl restart mqtt-to-postgres
+sudo systemctl stop mqtt-to-postgres
 ```
 
 ### Logy přes journald
 
 ```bash
-journalctl --user -u mqtt-to-postgres -f
+journalctl -u mqtt-to-postgres -f
 ```
 
 ---

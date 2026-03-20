@@ -5,3 +5,4 @@
 .tags_root
 pirani-kalibrace/
 config.py
+postgres-push/mqtt_push.cfg
