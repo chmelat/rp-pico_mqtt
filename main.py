@@ -11,9 +11,10 @@ import ntptime
 import time
 import math
 import gc
+import usocket
 import config
 
-VERSION = "1.1.2"
+VERSION = "1.1.3"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -253,7 +254,6 @@ class SharedResources:
             self.wdt.feed()
 
         # TCP pre-test s timeoutom – predíde blokovaniu WDT pri nedostupnom brokeri
-        import usocket
         try:
             addr = usocket.getaddrinfo(config.MQTT_BROKER, config.MQTT_PORT)[0][-1]
             s = usocket.socket()
@@ -413,7 +413,7 @@ class SensorChannel:
 
         # Hodnotu publikuj jen když je platná
         if self.last_value is not None:
-            t = time.gmtime(time.mktime(time.gmtime()) + self.shared.utc_offset)
+            t = time.gmtime(time.time() + self.shared.utc_offset)
             ts = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(
                 t[0], t[1], t[2], t[3], t[4], t[5])
             formatted = "{:.{}f} {}".format(self.last_value, self.precision, ts)
