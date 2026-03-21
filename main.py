@@ -274,6 +274,7 @@ class SharedResources:
         if self.wdt:
             self.wdt.feed()
 
+        client = None
         try:
             client = MQTTClient(config.MQTT_CLIENT_ID,
                                 config.MQTT_BROKER,
@@ -292,10 +293,11 @@ class SharedResources:
             if isinstance(e, (MemoryError, KeyboardInterrupt, SystemExit)):
                 raise
             print("MQTT error:", e)
-            try:
-                client.disconnect()
-            except BaseException:
-                pass
+            if client is not None:
+                try:
+                    client.disconnect()
+                except BaseException:
+                    pass
             self._mqtt_next_try = time.ticks_add(now, self._mqtt_backoff)
             self._mqtt_backoff = min(self._mqtt_backoff * 2, 60_000)
             return False

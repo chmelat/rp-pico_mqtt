@@ -1,5 +1,7 @@
 # mqtt_to_postgres — MQTT → PostgreSQL daemon
 
+Verze: `1.0.0`
+
 Daemon čte senzorová data publikovaná Raspberry Pi Pico 2W přes MQTT a zapisuje
 je do PostgreSQL databáze. Navazuje na stávající C systém (DCON) a používá
 identický SQL pattern (`INSERT … SELECT`) jako `postgres_query.c`.
@@ -17,6 +19,8 @@ identický SQL pattern (`INSERT … SELECT`) jako `postgres_query.c`.
 ```bash
 pip install paho-mqtt psycopg2-binary
 ```
+
+README odpovida aktualnimu kodu, ktery je kompatibilni s `paho-mqtt` 1.x i 2.x.
 
 ---
 
@@ -111,16 +115,17 @@ Daemon ignoruje:
 | payload neparsovatelný jako `float` | chybové řetězce, prázdné zprávy |
 
 Zpracovává pouze zprávy, kde:
-1. topic **nekončí** `/status`, a
-2. payload lze převést na `float`.
+1. topic **nekončí** `/status`,
+2. první token payloadu lze převést na `float`, a
+3. druhý token payloadu obsahuje timestamp.
 
 Příklady z reálného provozu:
 
 ```
 sensor/L200h/status online       → IGNOROVÁNO (končí /status)
 sensor/L200h/pirani/status OK    → IGNOROVÁNO (končí /status)
-sensor/L200h/pirani 0.152        → ULOŽENO jako L200h/pirani = 0.152
-sensor/L200h/p1 0.500            → ULOŽENO jako L200h/p1 = 0.500
+sensor/L200h/pirani 0.152 2026-03-19T14:23:01  → ULOŽENO jako L200h/pirani = 0.152
+sensor/L200h/p1 0.500 2026-03-19T14:23:02      → ULOŽENO jako L200h/p1 = 0.500
 ```
 
 ### Fronta
@@ -167,8 +172,9 @@ SELECT id, %s, %s FROM sensor WHERE name = %s
 Parametry jsou předávány přes psycopg2 (`%s` placeholders) — SQL injection
 nehrozí, escaping zajišťuje knihovna.
 
-Časová značka je generována v UTC na serveru daemona (`datetime.now(timezone.utc)`),
-nikoliv převzata z MQTT zprávy.
+Časová značka se nepřepočítává na serveru daemona. Skript ji přebírá přímo
+z MQTT payloadu jako druhý token a ukládá ji do `create_tms`. Formát payloadu
+je tedy očekáván jako `hodnota timestamp`, například `0.152 2026-03-19T14:23:01`.
 
 ### Graceful shutdown
 

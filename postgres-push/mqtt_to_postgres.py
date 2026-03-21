@@ -21,6 +21,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+VERSION = "1.0.0"
 QUEUE_MAX = 10_000
 INSERT_SQL = (
     "INSERT INTO sensor_value (sensor_id, value, create_tms) "
@@ -91,6 +92,8 @@ def main():
     if len(sys.argv) > 1:
         cfg_path = sys.argv[1]
 
+    log.info("Starting mqtt_to_postgres v%s", VERSION)
+
     cfg = load_config(cfg_path)
     conn_string = cfg["postgres"]["connection"]
     broker = cfg["mqtt"]["broker"]
@@ -114,7 +117,7 @@ def main():
         sensor_name = t.removeprefix(strip_prefix)
         insert_queue.append((value, ts, sensor_name))
 
-    def on_connect(client, userdata, flags, rc):
+    def on_connect(client, userdata, flags, rc, *args):
         if rc == 0:
             log.info("MQTT connected, subscribing to %s", topic)
             client.subscribe(topic)

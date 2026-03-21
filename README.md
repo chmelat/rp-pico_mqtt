@@ -202,18 +202,18 @@ Veškeré parametry jsou v souboru `config.py`.
 
 | Parametr | Výchozí | Popis |
 |----------|---------|-------|
-| `WIFI_SSID` | `"tvoje_SSID"` | Název WiFi sítě |
-| `WIFI_PASSWORD` | `"tvoje_heslo"` | Heslo WiFi sítě |
+| `WIFI_SSID` | `""` | Název WiFi sítě |
+| `WIFI_PASSWORD` | `""` | Heslo WiFi sítě |
 
 ### MQTT
 
 | Parametr | Výchozí | Popis |
 |----------|---------|-------|
-| `MQTT_BROKER` | `"192.168.1.x"` | IP adresa MQTT brokeru |
+| `MQTT_BROKER` | `"10.10.0.43"` | IP adresa MQTT brokeru |
 | `MQTT_PORT` | `1883` | Port MQTT brokeru |
-| `MQTT_CLIENT_ID` | `"pico_tlak"` | Identifikátor klienta |
+| `MQTT_CLIENT_ID` | `"pico_L200h"` | Identifikátor klienta |
 | `MQTT_KEEPALIVE` | `60` | Keepalive interval v sekundách |
-| `MQTT_STATUS_TOPIC` | `"sensor/.../status"` | Topic pro LWT a stav zařízení (online/offline) |
+| `MQTT_STATUS_TOPIC` | `"sensor/L200h/status"` | Topic pro LWT a stav zařízení (online/offline) |
 
 ### Piny
 
@@ -231,8 +231,8 @@ Veškeré parametry jsou v souboru `config.py`.
 | Parametr | Výchozí | Popis |
 |----------|---------|-------|
 | `ADC_ADDRESS` | `0x48` | I2C adresa ADS1115 (viz tabulka níže) |
-| `ADC_GAIN` | `4` | Gain ADS1115 (viz tabulka níže) |
-| `ADC_RATE` | `0` | Rychlost vzorkování (viz tabulka níže) |
+| `ADC_GAIN` | `2` | Gain ADS1115 (viz tabulka níže) |
+| `ADC_RATE` | `3` | Rychlost vzorkování (viz tabulka níže) |
 | `ADC_SAMPLES` | `5` | Počet vzorků pro průměrování |
 
 **Adresa ADS1115** (podle zapojení ADDR pinu):
@@ -328,8 +328,8 @@ SENSORS = [
     {
         "type": "current_loop",
         "channel": 0,
-        "topic": "sensor/tlak/pec1",
-        "name": "Pec 1",
+        "topic": "sensor/L200h/p1",
+        "name": "p1",
         "r_bocnik": 99.1,     # [Ohm]
         "i_min": 0.004,       # [A]
         "i_max": 0.020,       # [A]
@@ -344,10 +344,10 @@ SENSORS = [
         "name": "Pirani",
         "a": -6.435,
         "b": 0.7418,
-        "c": 0.2536,
+        "c": 0.8018,
         "u_divider": 5.009,   # koeficient děliče napětí
         "u_min": 0.0,         # [V] za děličem
-        "u_max": 2.048,       # [V] za děličem
+        "u_max": 2.0,       # [V] za děličem
         "p_min": 1e-4,        # [mbar]
         "p_max": 1000.0,      # [mbar]
         "precision": 3,
