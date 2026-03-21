@@ -1,8 +1,8 @@
 # Audit zpráva — rp-pico_mqtt
 
 **Datum:** 2026-03-21
-**Verze main.py:** 1.1.3
-**Verze mqtt_to_postgres.py:** 1.0.0
+**Verze main.py:** 1.1.4
+**Verze mqtt_to_postgres.py:** 1.0.1
 **Soubory:** `main.py`, `postgres-push/mqtt_to_postgres.py`
 
 ---
@@ -11,7 +11,6 @@
 
 | ID | Závažnost | Soubor | Popis |
 |----|-----------|--------|-------|
-| B1 | STŘEDNÍ | `main.py` | `PiraniSensor` — uncaught `ValueError` z `math.sqrt` může vést k WDT resetu |
 | R1 | NÍZKÁ | `main.py` | `flush_buffer` — WDT feed jen každých 10 zpráv |
 | D1 | INFO | `main.py` | Status topic se neukládá do bufferu při výpadku MQTT |
 | D2 | INFO | `main.py` | `_pub_buffer.pop(0)` je O(n) |
@@ -21,6 +20,13 @@
 ---
 
 ## Opraveno od předchozího auditu
+
+### F0 — `main.py`: validace konfigurace `PiraniSensor`
+
+**Stav:** OPRAVENO
+
+`PiraniSensor.__init__()` nyní validuje `u_divider`, `u_min`, `u_max`, `p_min` a `p_max`. Chybná konfigurace se zachytí při vytvoření senzoru místo pádu až v `math.sqrt()` za běhu.
+
 
 ### F1 — `mqtt_to_postgres.py`: kompatibilita s `paho-mqtt >= 2.x`
 
@@ -44,28 +50,7 @@ Byly srovnány nalezené nesoulady v `README.md` a `postgres-push/README_mqtt_to
 
 ## Otevřené nálezy
 
-### B1 — `PiraniSensor`: nezachycená `ValueError` z `math.sqrt`
-
-**Soubor:** `main.py`
-**Závažnost:** STŘEDNÍ
-
-```python
-u_actual = voltage * self.u_divider
-pressure = math.exp(self.a + self.b * u_actual + self.c * math.sqrt(u_actual))
-```
-
-**Problém:**
-Pokud je `u_divider` nakonfigurováno jako záporné číslo, `u_actual` je záporné i při nezáporném `voltage`. `math.sqrt` na záporném čísle hodí `ValueError`. V bloku je zachycen pouze `OverflowError`. Výjimka probublá přes `read()` až do hlavní smyčky a skončí ve fatal větvi s následným WDT resetem.
-
-**Oprava:**
-```python
-try:
-    u_actual = voltage * self.u_divider
-    pressure = math.exp(self.a + self.b * u_actual + self.c * math.sqrt(u_actual))
-except (OverflowError, ValueError):
-    return None, ERR_HI
-```
-Nebo validovat `u_divider > 0` už v `PiraniSensor.__init__` a vracet `ERR_CFG`.
+V této chvíli nejsou evidovány žádné otevřené bugy střední nebo vyšší závažnosti.
 
 ---
 

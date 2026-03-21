@@ -14,7 +14,7 @@ import gc
 import usocket
 import config
 
-VERSION = "1.1.3"
+VERSION = "1.1.4"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -480,6 +480,15 @@ class PiraniSensor(SensorChannel):
         self.u_max = cfg.get("u_max", shared.v_ref or 2.048)
         self.p_min = cfg.get("p_min", 1e-4)
         self.p_max = cfg.get("p_max", 1000.0)
+
+        if self.u_divider <= 0:
+            raise ValueError("u_divider must be > 0")
+        if self.u_min < 0:
+            raise ValueError("u_min must be >= 0")
+        if self.u_max <= self.u_min:
+            raise ValueError("u_max must be > u_min")
+        if self.p_max <= self.p_min:
+            raise ValueError("p_max must be > p_min")
 
     def convert_raw(self, raw):
         """Převod raw ADC hodnoty na tlak přes regresní model"""

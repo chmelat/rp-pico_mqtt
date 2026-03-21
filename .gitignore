@@ -6,3 +6,4 @@
 pirani-kalibrace/
 config.py
 postgres-push/mqtt_push.cfg
+*.swp

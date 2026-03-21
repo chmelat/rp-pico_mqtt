@@ -21,7 +21,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 QUEUE_MAX = 10_000
 INSERT_SQL = (
     "INSERT INTO sensor_value (sensor_id, value, create_tms) "

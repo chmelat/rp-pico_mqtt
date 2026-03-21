@@ -1,6 +1,6 @@
 # mqtt_to_postgres — MQTT → PostgreSQL daemon
 
-Verze: `1.0.0`
+Verze: `1.0.1`
 
 Daemon čte senzorová data publikovaná Raspberry Pi Pico 2W přes MQTT a zapisuje
 je do PostgreSQL databáze. Navazuje na stávající C systém (DCON) a používá
