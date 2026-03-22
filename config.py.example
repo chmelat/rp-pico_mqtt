@@ -19,6 +19,7 @@ I2C_FREQ = 400_000
 TM_CLK = 3
 TM_DIO = 2
 DISPLAY_SENSOR = 0  # index senzoru pro zobrazení na displeji (0 = první)
+BUTTON_PIN = 14    # pin pro přepínání displeje tlačítkem (None = deaktivováno)
 
 # Sdílené ADC nastavení
 ADC_ADDRESS = 0x48  # I2C adresa ADS1115 (0x48-0x4B podle ADDR pinu)
@@ -43,6 +44,7 @@ SENSORS = [
         "topic": "sensor/L200h/p1" , # MQTT topic
         "name": "p1",                # pro debug
         # Parametry specifické pro current_loop:
+        "led_pin": 15,     # pin pro LED indikátor aktivního senzoru (None = bez LED)
         "r_bocnik": 99.1,  # [Ohm]
         "i_min": 0.004,  # [A]
         "i_max": 0.020,  # [A]
@@ -54,6 +56,7 @@ SENSORS = [
         "type": "pirani",            # Pirani vakuometr
         "channel": 1,
         "topic": "sensor/L200h/pirani",
+        "led_pin": 16,     # pin pro LED indikátor aktivního senzoru (None = bez LED)
         "name": "Pirani",
         # Regresní koeficienty: p = exp(a + b*u + c*sqrt(u)) [mbar], [u - 0-10V]
         "a": -6.435,

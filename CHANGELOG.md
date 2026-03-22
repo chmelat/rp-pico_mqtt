@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## main.py 1.2.0
+
+### Added
+- Button on `BUTTON_PIN` cycles display through sensors via hardware IRQ (`micropython.schedule`, 200 ms debounce).
+- Per-sensor `led_pin` config key: the active sensor's LED pin is driven HIGH, others LOW.
+- Both features are optional — `None` disables them without code changes.
+
 ## main.py 1.1.4
 
 ### Added

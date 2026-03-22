@@ -3,6 +3,7 @@
 # Podpora více heterogenních senzorů na ADS1115
 #
 from machine import I2C, Pin, WDT
+import micropython
 from ads1x15 import ADS1115
 import tm1637
 from umqtt.simple import MQTTClient, MQTTException
@@ -14,7 +15,7 @@ import gc
 import usocket
 import config
 
-VERSION = "1.1.4"
+VERSION = "1.2.0"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -383,6 +384,7 @@ class SensorChannel:
         self.topic = cfg["topic"]
         self.status_topic = cfg.get("status_topic", cfg["topic"] + "/status")
         self.name = cfg.get("name", "CH{}".format(self.channel))
+        self.led_pin = cfg.get("led_pin", None)
         self.precision = cfg.get("precision", 3)
         self.last_value = None
         self.last_error = None
@@ -556,6 +558,30 @@ class SensorManager:
 
         self._conn_error = None  # ERR_WIFI nebo ERR_MQTT
 
+        # LED piny (paralelní list k self.sensors)
+        self._leds = []
+        for s in self.sensors:
+            p = s.led_pin
+            self._leds.append(Pin(p, Pin.OUT) if p is not None else None)
+
+        # Tlačítko pro přepínání displeje
+        self._btn_last = 0
+        self._btn = None
+        btn_pin = getattr(config, 'BUTTON_PIN', None)
+        if btn_pin is not None and self.sensors:
+            self._btn = Pin(btn_pin, Pin.IN, Pin.PULL_UP)
+            self._btn.irq(trigger=Pin.IRQ_FALLING, handler=self._btn_irq)
+
+    def _btn_irq(self, pin):
+        micropython.schedule(self._btn_pressed, 0)
+
+    def _btn_pressed(self, _):
+        now = time.ticks_ms()
+        if time.ticks_diff(now, self._btn_last) < 200:
+            return
+        self._btn_last = now
+        self._display_sensor = (self._display_sensor + 1) % len(self.sensors)
+
     def _read_all(self):
         """Čtení ze všech senzorů"""
         for s in self.sensors:
@@ -591,6 +617,10 @@ class SensorManager:
             self.shared.show_error(s.last_error)
         elif s.last_value is not None:
             self.shared.show_value(s.last_value)
+
+        for i, led in enumerate(self._leds):
+            if led is not None:
+                led.value(1 if i == self._display_sensor else 0)
 
     def run(self):
         
