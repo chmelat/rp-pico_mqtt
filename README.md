@@ -11,6 +11,8 @@ MicroPython senzorový systém pro Raspberry Pi Pico 2W. Podporuje **až 4 heter
 - **TM1637** — 4-místný 7-segmentový LED displej s desetinnými tečkami
 - **Bočník** — rezistor pro převod proudu na napětí (pro 4-20 mA senzory)
 - **Senzory** — průmyslové senzory s výstupem 4-20 mA, Pirani vakuometry, nebo jiné
+- **Tlačítko** (volitelné) — přepínání zobrazeného senzoru na displeji
+- **LED indikátory** (volitelné) — jedna LED na senzor, svítí při aktivním zobrazení
 
 ### Zapojení (příklad se dvěma senzory)
 
@@ -28,6 +30,14 @@ ADS1115 I2C:
 TM1637 displej:
     CLK ── GPIO 3
     DIO ── GPIO 2
+
+Tlačítko (volitelné):
+    GPIO 14 ── tlačítko ── GND
+    (interní pull-up, stisk = sestupná hrana)
+
+LED indikátory (volitelné, jedna na senzor):
+    GPIO 15 ── 330Ω ── LED ── GND   (senzor 0)
+    GPIO 16 ── 330Ω ── LED ── GND   (senzor 1)
 ```
 
 ### Princip měření
@@ -274,6 +284,7 @@ Při inicializaci se provede I2C scan a ověří se přítomnost zařízení na 
 | Parametr | Výchozí | Popis |
 |----------|---------|-------|
 | `DISPLAY_SENSOR` | `0` | Index senzoru pro zobrazení (0 = první) |
+| `BUTTON_PIN` | `None` | GPIO pin pro přepínací tlačítko (`None` = deaktivováno) |
 
 ### Systém
 
@@ -295,6 +306,7 @@ Seznam senzorů se konfiguruje v poli `SENSORS`. Společné parametry:
 | `name` | ne | Název pro debug (výchozí: `"CH{channel}"`) |
 | `status_topic` | ne | MQTT topic pro stav senzoru (výchozí: `{topic}/status`) |
 | `precision` | ne | Počet desetinných míst pro MQTT (výchozí: 3) |
+| `led_pin` | ne | GPIO pin pro LED indikátor aktivního senzoru (`None` = bez LED) |
 
 **Parametry pro `current_loop`:**
 
@@ -330,6 +342,7 @@ SENSORS = [
         "channel": 0,
         "topic": "sensor/L200h/p1",
         "name": "p1",
+        "led_pin": 15,        # GPIO pin pro LED indikátor (None = bez LED)
         "r_bocnik": 99.1,     # [Ohm]
         "i_min": 0.004,       # [A]
         "i_max": 0.020,       # [A]
@@ -341,6 +354,7 @@ SENSORS = [
         "type": "pirani",
         "channel": 1,
         "topic": "sensor/L200h/pirani",
+        "led_pin": 16,        # GPIO pin pro LED indikátor (None = bez LED)
         "name": "Pirani",
         "a": -6.435,
         "b": 0.7418,
@@ -357,7 +371,7 @@ SENSORS = [
 
 ## Displej
 
-4-místný 7-segmentový displej s desetinnými tečkami. Zobrazuje hodnotu ze senzoru vybraného parametrem `DISPLAY_SENSOR`.
+4-místný 7-segmentový displej s desetinnými tečkami. Zobrazuje hodnotu ze senzoru vybraného parametrem `DISPLAY_SENSOR`. Tlačítkem na `BUTTON_PIN` lze cyklicky přepínat mezi senzory (sestupná hrana, debounce 200 ms); LED na `led_pin` aktivního senzoru svítí.
 
 ### Formátování hodnot
 
