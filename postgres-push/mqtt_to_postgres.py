@@ -21,13 +21,13 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 QUEUE_MAX = 10_000
-INSERT_SQL = (
-    "INSERT INTO sensor_value (sensor_id, value, create_tms) "
-    "SELECT id, %s, %s FROM sensor WHERE name = %s"
-)
-
+#INSERT_SQL = (
+#    "INSERT INTO sensor_value (sensor_id, value, create_tms) "
+#    "SELECT id, %s, %s FROM sensor WHERE name = %s"
+#)
+INSERT_SQL = "SELECT insert_sensor_value(%s, %s, %s)"
 
 def load_config(path):
     cfg = configparser.ConfigParser()
@@ -115,7 +115,8 @@ def main():
         except (ValueError, TypeError, IndexError):
             return
         sensor_name = t.removeprefix(strip_prefix)
-        insert_queue.append((value, ts, sensor_name))
+#        insert_queue.append((value, ts, sensor_name))
+        insert_queue.append((sensor_name, value, ts))
 
     def on_connect(client, userdata, flags, rc, *args):
         if rc == 0:
