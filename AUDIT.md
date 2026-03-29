@@ -2,6 +2,100 @@
 
 ---
 
+## Audit #3 — dlouhodobý provoz (verze 1.2.3)
+
+**Datum:** 2026-03-29
+**Zaměření:** Potenciální problémy při nepřetržitém provozu (memory, reconnect logika, časovače)
+
+### Souhrn závažnosti
+
+| ID | Závažnost | Popis | Stav |
+|----|-----------|-------|------|
+| B1 | STŘEDNÍ   | NTP selhání → `_offset_day` neaktualizován → retry každou sekundu po celý den | Otevřeno |
+| B2 | NÍZKÁ     | Socket únik při selhání `disconnect()` — přechodný, GC opraví | Otevřeno |
+| B3 | INFO      | `gc.collect()` přeskočen při přetažené iteraci smyčky | Otevřeno |
+
+---
+
+### B1 — NTP selhání způsobí opakování každou sekundu po celý den
+
+**Soubor:** `main.py:641–646`
+
+Pokud `_sync_ntp()` selže (výjimka zachycena uvnitř), `_offset_day` se neaktualizuje. Podmínka v `run()` pak platí každou sekundu po celý zbytek dne:
+
+```python
+if t[3] >= 1 and t[2] != self.shared._offset_day:  # True každou sekundu
+    if self.shared.wlan.isconnected():
+        self.shared._sync_ntp()  # selže, _offset_day zůstane starý
+```
+
+Každé volání `ntptime.settime()` čeká na UDP odpověď až 5 sekund (`ntptime.timeout = 5`). Efektivní interval smyčky se při NTP výpadku změní z 1 s na ~5 s po celý den. Neovlivní WDT (5 s < 8 s, WDT nakrmen na začátku iterace), ale způsobí zpomalení publikování senzorů a zbytečné UDP pakety každých 5 sekund.
+
+**Doporučení:**
+
+```python
+if t[3] >= 1 and t[2] != self.shared._offset_day:
+    if self.shared.wlan.isconnected():
+        self.shared._sync_ntp()
+    if self.shared._offset_day != t[2]:  # NTP selhalo nebo bez WiFi
+        self.shared.utc_offset = cet_offset(t)
+        self.shared._offset_day = t[2]
+```
+
+---
+
+### B2 — Socket únik při selhání `disconnect()`
+
+**Soubor:** `main.py:237–244`
+
+`umqtt.simple.MQTTClient.disconnect()` nejprve zapíše DISCONNECT paket, pak zavře socket. Pokud `sock.write()` vyhodí `OSError` (přerušené spojení), `sock.close()` se nikdy nezavolá. `_close_mqtt()` výjimku pohltí — socket zůstane otevřený až do GC.
+
+MicroPython lwIP pool má typicky 4–5 socketů. Při prudce nestabilní síti a zpožděném GC může pool přechodně přetéct, čímž `connect_mqtt()` selže s `ENOMEM`. Stav je přechodný — GC ho opraví při příštím volání `gc.collect()`.
+
+**Doporučení:**
+
+```python
+def _close_mqtt(self):
+    if self.mqtt is not None:
+        try:
+            self.mqtt.disconnect()
+        except Exception:
+            try:
+                self.mqtt.sock.close()  # záloha při selhání disconnect()
+            except Exception:
+                pass
+        self.mqtt = None
+```
+
+---
+
+### B3 — `gc.collect()` přeskočen při přetažené iteraci (INFO)
+
+**Soubor:** `main.py:673`
+
+```python
+if remaining > 0:
+    gc.collect()
+```
+
+Pokud iterace trvá déle než `INTERVAL_S * 1000 ms` (např. kvůli B1 nebo MQTT reconnectu), GC se nespustí. MicroPython spouští GC automaticky při selhání alokace, takže nejde o crash riziko. Při souběhu B1 (5s iterace) a aktivního bufferu může fragmentace narůstat rychleji. Samoléčí se při první úspěšné krátké iteraci.
+
+---
+
+### Ověřená správnost pro dlouhodobý provoz
+
+| Oblast | Výsledek |
+|--------|----------|
+| `ticks_ms()` rollover (~49 dní) — všechna srovnání přes `ticks_diff` / `ticks_add` | Správně ✓ |
+| `ticks_ms() % 2500` v `_update_display()` — Python `%` vrací vždy ≥ 0 | Správně ✓ |
+| `_pub_buffer` — growth bounded na `PUBLISH_BUFFER_MAX` | Správně ✓ |
+| WiFi reconnect deadline + retry logika | Správně ✓ |
+| MQTT backoff — reset po reconnectu | Správně ✓ |
+| Denní DST přepočet — správně čeká na 01:00 UTC | Správně ✓ |
+| WDT krmení při `flush_buffer()` (každých 10 zpráv) | Přijatelné ✓ |
+
+---
+
 ## Audit #2 — verze 1.2.0 → opraveno v 1.2.1
 
 **Datum:** 2026-03-29
