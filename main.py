@@ -15,7 +15,7 @@ import gc
 import usocket
 import config
 
-VERSION = "1.2.4"
+VERSION = "1.2.5"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -242,7 +242,10 @@ class SharedResources:
             try:
                 self.mqtt.disconnect()
             except Exception:
-                pass
+                try:
+                    self.mqtt.sock.close()  # záloha: disconnect() socket nezavře pokud selže write()
+                except Exception:
+                    pass
             self.mqtt = None
 
     def connect_mqtt(self):

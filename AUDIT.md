@@ -12,7 +12,7 @@
 | ID | Závažnost | Popis | Stav |
 |----|-----------|-------|------|
 | B1 | STŘEDNÍ   | NTP selhání → `_offset_day` neaktualizován → retry každou sekundu po celý den | **OPRAVENO v 1.2.4** |
-| B2 | NÍZKÁ     | Socket únik při selhání `disconnect()` — přechodný, GC opraví | Otevřeno |
+| B2 | STŘEDNÍ   | Socket únik při selhání `disconnect()` — potvrzeno v produkci (E--2, restart pomohl) | **OPRAVENO v 1.2.5** |
 | B3 | INFO      | `gc.collect()` přeskočen při přetažené iteraci smyčky | Otevřeno |
 
 ---
@@ -27,28 +27,13 @@ Pokud `_sync_ntp()` selhala, výjimka byla zachycena uvnitř a `_offset_day` se 
 
 ---
 
-### B2 — Socket únik při selhání `disconnect()`
+### B2 — Socket únik při selhání `disconnect()` — OPRAVENO v 1.2.5
 
 **Soubor:** `main.py:237–244`
 
-`umqtt.simple.MQTTClient.disconnect()` nejprve zapíše DISCONNECT paket, pak zavře socket. Pokud `sock.write()` vyhodí `OSError` (přerušené spojení), `sock.close()` se nikdy nezavolá. `_close_mqtt()` výjimku pohltí — socket zůstane otevřený až do GC.
+`umqtt.simple.disconnect()` nezavře socket pokud `sock.write()` selže. Při nestabilní síti se lwIP pool (4–5 socketů) postupně vyčerpal, `connect_mqtt()` selhalo s `ENOMEM` → trvalé `E--2` i přes funkční měření. Potvrzeno v produkci — restart pomohl.
 
-MicroPython lwIP pool má typicky 4–5 socketů. Při prudce nestabilní síti a zpožděném GC může pool přechodně přetéct, čímž `connect_mqtt()` selže s `ENOMEM`. Stav je přechodný — GC ho opraví při příštím volání `gc.collect()`.
-
-**Doporučení:**
-
-```python
-def _close_mqtt(self):
-    if self.mqtt is not None:
-        try:
-            self.mqtt.disconnect()
-        except Exception:
-            try:
-                self.mqtt.sock.close()  # záloha při selhání disconnect()
-            except Exception:
-                pass
-        self.mqtt = None
-```
+`_close_mqtt()` nyní explicitně zavírá socket v except větvi jako záloha.
 
 ---
 

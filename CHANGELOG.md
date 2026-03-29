@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## main.py 1.2.5
+
+### Fixed
+- `_close_mqtt()`: explicitly close the socket if `disconnect()` raises — `umqtt.simple`
+  does not close the socket when `sock.write()` fails, which could exhaust the lwIP socket
+  pool on repeated reconnects and cause persistent MQTT failure (observed in production
+  as E--2 with normal sensor readings, cleared by restart).
+
 ## main.py 1.2.4
 
 ### Fixed
