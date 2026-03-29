@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## main.py 1.2.3
+
+### Fixed
+- Added comment on `client.sock.settimeout()` explaining the intentional use of umqtt.simple internal API (no public alternative exists).
+- `CLAUDE.md`: corrected MQTT retain documentation — `{topic}/status` is published with `retain=False` (intentional: subscribers should not receive stale status after reconnect).
+
 ## main.py 1.2.2
 
 ### Fixed

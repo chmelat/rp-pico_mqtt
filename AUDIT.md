@@ -15,8 +15,8 @@
 | A2  | KRITICKÁ    | `utc_offset` neaktualizován po NTP sync — chybná razítka až 24 h | **OPRAVENO v 1.2.1** |
 | A3  | STŘEDNÍ     | `ValueError` z `PiraniSensor.__init__()` nekachytaná v `create_sensor()` | **OPRAVENO v 1.2.1** |
 | A4  | STŘEDNÍ     | `getaddrinfo()` bez timeoutu — blokuje WDT pro hostname | **OPRAVENO v 1.2.2** |
-| A5  | NÍZKÁ       | `client.sock.settimeout()` — přístup k privátnímu API umqtt | Otevřeno |
-| A6  | NÍZKÁ       | `retain=False` pro `status_topic` — rozporuje CLAUDE.md | Otevřeno |
+| A5  | NÍZKÁ       | `client.sock.settimeout()` — přístup k privátnímu API umqtt | **OPRAVENO v 1.2.3** |
+| A6  | NÍZKÁ       | `retain=False` pro `status_topic` — rozporuje CLAUDE.md | **OPRAVENO v 1.2.3** |
 
 ---
 
@@ -91,23 +91,19 @@ Opraveno dokumentačním komentářem v `config.py.example` — `MQTT_BROKER` mu
 
 ### Nízká závažnost
 
-#### A5 — `client.sock.settimeout()` — privátní API `umqtt.simple`
+#### A5 — `client.sock.settimeout()` — privátní API `umqtt.simple` — OPRAVENO v 1.2.3
 
-**Soubor:** `main.py:287`
+**Soubor:** `main.py:290`
 
-`umqtt.simple.MQTTClient` po `connect()` exponuje atribut `.sock`. Ten není součástí veřejného API. Při aktualizaci knihovny selže tiše — `AttributeError` zachytí obecný `BaseException` handler a interpretuje to jako selhání připojení.
-
-**Doporučení:** Okomentovat jako záměrný hack se zdůvodněním.
+Přidán komentář přímo na řádek vysvětlující záměr a důvod přístupu k internímu atributu.
 
 ---
 
-#### A6 — `retain=False` pro `status_topic` — rozporuje dokumentaci
+#### A6 — `retain=False` pro `status_topic` — OPRAVENO v 1.2.3
 
-**Soubor:** `main.py:415`
+**Soubor:** `CLAUDE.md:66`
 
-`CLAUDE.md` dokumentuje: *"both `retain=True`"*. Kód používá `retain=False` pro status. Subscriber připojující se po posledním publish neuvidí aktuální stav senzoru.
-
-Jde buď o záměrnou odchylku (pak opravit dokumentaci), nebo o bug (pak opravit kód).
+Záměrné chování — status se nepublikuje jako retained, aby subscriber po reconnectu nedostal zastaralý stav. Dokumentace v `CLAUDE.md` opravena tak, aby odpovídala kódu.
 
 ---
 

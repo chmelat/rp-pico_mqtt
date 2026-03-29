@@ -15,7 +15,7 @@ import gc
 import usocket
 import config
 
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -287,7 +287,7 @@ class SharedResources:
             client.set_last_will(config.MQTT_STATUS_TOPIC,
                                  "offline", retain=True)
             client.connect()
-            client.sock.settimeout(2)
+            client.sock.settimeout(2)  # přístup k internímu atributu umqtt.simple — umqtt nenabízí veřejné API pro nastavení socket timeoutu
             client.publish(config.MQTT_STATUS_TOPIC, "online", retain=True)
             self.mqtt = client
             self._mqtt_backoff = 1000

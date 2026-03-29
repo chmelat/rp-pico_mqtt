@@ -63,7 +63,7 @@ SensorChannel          # abstract base: read() → convert_raw() → publish()
 
 **WDT safety:** `safe_sleep_ms()` feeds the hardware watchdog every `WDT_TIMEOUT_MS // 2` ms. All long waits must use this method. MQTT broker TCP pre-test uses a 4s socket timeout to prevent WDT starvation.
 
-**MQTT:** Uses `umqtt.simple`. LWT publishes `"offline"` on unexpected disconnect; `"online"` on connect. Each sensor publishes to `{topic}` (value, only when valid) and `{topic}/status` (`"OK"` or error string), both `retain=True`.
+**MQTT:** Uses `umqtt.simple`. LWT publishes `"offline"` on unexpected disconnect; `"online"` on connect. Each sensor publishes to `{topic}` (value, only when valid, `retain=True`) and `{topic}/status` (`"OK"` or error string, `retain=False`).
 
 **Display:** Shows sensor selected by `DISPLAY_SENSOR` index. When WiFi/MQTT fails but sensor reads are valid, alternates: value (2s) / error code (0.5s).
 
