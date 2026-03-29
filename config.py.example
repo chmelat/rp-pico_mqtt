@@ -3,7 +3,7 @@ WIFI_SSID = ""
 WIFI_PASSWORD = ""
 
 # MQTT
-MQTT_BROKER = "10.10.0.43"  # eth, zero@uni (pi5)
+MQTT_BROKER = "10.10.0.43"  # eth, zero@uni (pi5) — vždy IP adresa, ne hostname (hostname blokuje WDT při DNS timeoutu)
 MQTT_PORT = 1883
 MQTT_CLIENT_ID = "pico_L200h"
 MQTT_KEEPALIVE = 60          # [s] keepalive interval pro broker

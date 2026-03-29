@@ -14,7 +14,7 @@
 | A1  | ~~KRITICKÁ~~ | WDT nespustí při selhání `__init__` — zařízení nerestartuje | Není chyba — viz níže |
 | A2  | KRITICKÁ    | `utc_offset` neaktualizován po NTP sync — chybná razítka až 24 h | **OPRAVENO v 1.2.1** |
 | A3  | STŘEDNÍ     | `ValueError` z `PiraniSensor.__init__()` nekachytaná v `create_sensor()` | **OPRAVENO v 1.2.1** |
-| A4  | STŘEDNÍ     | `getaddrinfo()` bez timeoutu — blokuje WDT pro hostname | Otevřeno |
+| A4  | STŘEDNÍ     | `getaddrinfo()` bez timeoutu — blokuje WDT pro hostname | **OPRAVENO v 1.2.2** |
 | A5  | NÍZKÁ       | `client.sock.settimeout()` — přístup k privátnímu API umqtt | Otevřeno |
 | A6  | NÍZKÁ       | `retain=False` pro `status_topic` — rozporuje CLAUDE.md | Otevřeno |
 
@@ -79,17 +79,13 @@ except KeyError as e:
 
 ---
 
-#### A4 — `getaddrinfo()` bez timeoutu v TCP pre-testu
+#### A4 — `getaddrinfo()` bez timeoutu v TCP pre-testu — OPRAVENO v 1.2.2
 
 **Soubor:** `main.py:259`
 
-```python
-addr = usocket.getaddrinfo(config.MQTT_BROKER, config.MQTT_PORT)[0][-1]
-```
+Pro hostname by DNS dotaz bez timeoutu zablokoval vlákno na neurčito bez krmení WDT. MicroPython nenabízí `getaddrinfo()` s timeoutem.
 
-Pro IP adresu (jako v dodaném příkladu) jde o přímý lookup — žádný problém. Pro hostname by DNS dotaz bez timeoutu zablokoval vlákno na neurčito bez krmení WDT.
-
-**Doporučení:** Dokumentovat omezení v `config.py.example` (použít vždy IP adresu), nebo přidat poznámku do kódu.
+Opraveno dokumentačním komentářem v `config.py.example` — `MQTT_BROKER` musí být vždy IP adresa.
 
 ---
 

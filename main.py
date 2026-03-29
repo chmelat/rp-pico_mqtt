@@ -15,7 +15,7 @@ import gc
 import usocket
 import config
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## main.py 1.2.2
+
+### Fixed
+- `config.py.example`: `MQTT_BROKER` documented as IP-address-only — using a hostname causes `getaddrinfo()` to block indefinitely without feeding the WDT.
+
 ## main.py 1.2.1
 
 ### Fixed
