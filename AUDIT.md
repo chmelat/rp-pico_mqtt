@@ -1,116 +1,155 @@
 # Audit zpráva — rp-pico_mqtt
 
-**Datum:** 2026-03-21
-**Verze main.py:** 1.1.4
-**Verze mqtt_to_postgres.py:** 1.0.1
-**Soubory:** `main.py`, `postgres-push/mqtt_to_postgres.py`
+---
+
+## Audit #2 — verze 1.2.0
+
+**Datum:** 2026-03-29
+**Soubory:** `main.py`, `config.py.example`
+
+### Souhrn závažnosti
+
+| ID  | Závažnost   | Popis |
+|-----|-------------|-------|
+| A1  | KRITICKÁ    | WDT nespustí při selhání `__init__` — zařízení nerestartuje |
+| A2  | KRITICKÁ    | `utc_offset` neaktualizován po NTP sync — chybná razítka až 24 h |
+| A3  | STŘEDNÍ     | `ValueError` z `PiraniSensor.__init__()` nekachytaná v `create_sensor()` |
+| A4  | STŘEDNÍ     | `getaddrinfo()` bez timeoutu — blokuje WDT pro hostname |
+| A5  | NÍZKÁ       | `client.sock.settimeout()` — přístup k privátnímu API umqtt |
+| A6  | NÍZKÁ       | `retain=False` pro `status_topic` — rozporuje CLAUDE.md |
 
 ---
 
-## Souhrn závažnosti
+### Kritické chyby
 
-| ID | Závažnost | Soubor | Popis |
-|----|-----------|--------|-------|
-| R1 | NÍZKÁ | `main.py` | `flush_buffer` — WDT feed jen každých 10 zpráv |
-| D1 | INFO | `main.py` | Status topic se neukládá do bufferu při výpadku MQTT |
-| D2 | INFO | `main.py` | `_pub_buffer.pop(0)` je O(n) |
-| D3 | INFO | `mqtt_to_postgres.py` | Chybí autentizace MQTT |
-| D4 | INFO | `mqtt_to_postgres.py` | Backoff se neresetuje po selhání insertu, jen po reconnectu |
+#### A1 — WDT nespustí při selhání `__init__`
 
----
+**Soubor:** `main.py:627`
 
-## Opraveno od předchozího auditu
+`WDT` se inicializuje na začátku `SensorManager.run()`. Pokud `SensorManager.__init__()` vyhodí výjimku (špatná konfigurace, I2C chyba, neplatný parametr senzoru…), `run()` se nikdy nezavolá. WDT nikdy nespustí. Zařízení zůstane trvale zaseknuto na `E--5` bez auto-resetu.
 
-### F0 — `main.py`: validace konfigurace `PiraniSensor`
+Komentář `# WDT resetuje zařízení` (řádek 683) je v tomto případě nepravdivý.
 
-**Stav:** OPRAVENO
+**Reprodukce:** Nastavit `u_divider: -1` v konfiguraci Pirani senzoru → `ValueError` v `PiraniSensor.__init__()` → `create_sensor()` ho nezachytí (viz A3) → `SensorManager.__init__()` selže → `run()` se nikdy nezavolá → WDT nikdy nespustí.
 
-`PiraniSensor.__init__()` nyní validuje `u_divider`, `u_min`, `u_max`, `p_min` a `p_max`. Chybná konfigurace se zachytí při vytvoření senzoru místo pádu až v `math.sqrt()` za běhu.
-
-
-### F1 — `mqtt_to_postgres.py`: kompatibilita s `paho-mqtt >= 2.x`
-
-**Stav:** OPRAVENO
-
-Callback `on_connect` byl upraven na kompatibilní podpis s `*args`, takže skript funguje s `paho-mqtt` 1.x i 2.x.
-
-### F2 — `main.py`: potenciální použití nedefinované proměnné `client`
-
-**Stav:** OPRAVENO
-
-V `connect_mqtt()` je nyní `client` inicializováno na `None` před `try` blokem a `disconnect()` se volá jen pokud byl klient vytvořen.
-
-### F3 — dokumentace
-
-**Stav:** OPRAVENO
-
-Byly srovnány nalezené nesoulady v `README.md` a `postgres-push/README_mqtt_to_postgres.md` s aktuálním stavem implementace.
+**Doporučení:** Inicializovat WDT nejpozději na začátku `SharedResources.__init__()`, nebo přidat aktivní čekací smyčku ve `__main__` fatal handleru, která WDT nakrmí jednou a pak nechá expirovat.
 
 ---
 
-## Otevřené nálezy
+#### A2 — `utc_offset` neaktualizován po NTP synchronizaci
 
-V této chvíli nejsou evidovány žádné otevřené bugy střední nebo vyšší závažnosti.
+**Soubor:** `main.py:79–80`, `main.py:148–155`, `main.py:168–181`
 
----
-
-## Problémy spolehlivosti
-
-### R1 — `flush_buffer`: WDT se krmí jen každých 10 zpráv
-
-**Soubor:** `main.py`
-**Závažnost:** NÍZKÁ
+Pořadí inicializace v `SharedResources.__init__()`:
 
 ```python
-if self.wdt and sent % 10 == 0:
-    self.wdt.feed()
+t = time.gmtime()                # čas před NTP — může být epoch (2021-01-01)
+self.utc_offset = cet_offset(t)  # vypočítán z epochy → špatný výsledek
+...
+self.connect_wifi()              # → _sync_ntp() → čas skočí na aktuální
 ```
 
-**Problém:**
-Při větším zásobníku a vyšší latenci MQTT může `10 zpráv × latence` překročit `WDT_TIMEOUT_MS`.
+Po NTP synchronizaci se `utc_offset` nepřepočítá. Zůstane špatný až do příštího přepočtu v hlavní smyčce, který nastane nejdříve po 01:00 UTC jiného dne (podmínka `t[3] >= 1 and t[2] != _offset_day`). V nejhorším případě jsou MQTT payloady s chybným časovým razítkem téměř 24 hodin.
 
-**Doporučení:**
-Krmit WDT častěji, nebo podle uplynulého času místo pevného počtu zpráv.
+Stejný problém nastane při WiFi reconnectu: `check_wifi()` volá `_sync_ntp()`, ale `utc_offset` neaktualizuje.
 
----
+**Doporučení:** Přidat na konec `_sync_ntp()`:
 
-## Designové poznámky
-
-### D1 — Status topic se neukládá do bufferu při výpadku MQTT
-
-**Soubor:** `main.py`
-
-Status zpráva se při selhání publish nezapisuje do `_pub_buffer`, zatímco hodnota ano. Stav senzoru se tedy může při krátkém výpadku ztratit a napraví se až dalším měřicím cyklem. Pokud je to záměr, stálo by za to to explicitně okomentovat v kódu.
-
-### D2 — `_pub_buffer.pop(0)` je O(n)
-
-**Soubor:** `main.py`
-
-Pro aktuální limit `PUBLISH_BUFFER_MAX = 200` je to přijatelné, ale při růstu kapacity by bylo vhodnější použít datovou strukturu s O(1) odebíráním zleva.
-
-### D3 — Chybí autentizace MQTT v daemonu
-
-**Soubor:** `postgres-push/mqtt_to_postgres.py`
-
-Současný bridge používá `mqtt.Client()` bez `username/password`. V izolované síti to může být záměr, ale v méně důvěryhodném prostředí by bylo vhodné doplnit volitelnou autentizaci do konfigurace.
-
-### D4 — Backoff v `db_worker` se neresetuje po úspěšném insertu
-
-**Soubor:** `postgres-push/mqtt_to_postgres.py`
-
-`backoff` se resetuje po úspěšném připojení k DB. Funkčně to stačí, ale po selhání insertu by bylo konzistentnější resetovat backoff i po následném úspěšném zápisu batchu.
+```python
+t = time.gmtime()
+self.utc_offset = cet_offset(t)
+self._offset_day = t[2]
+```
 
 ---
 
-## Ověřená správnost
+### Střední závažnost
 
-Níže uvedené oblasti byly znovu prověřeny a jsou bez nálezu.
+#### A3 — `ValueError` z `PiraniSensor.__init__()` nekachytaná
+
+**Soubor:** `main.py:527–538`
+
+`PiraniSensor.__init__()` hází `ValueError` pro neplatné parametry (přidáno v auditu #1 jako F0). `create_sensor()` zachytává pouze `KeyError`:
+
+```python
+except KeyError as e:
+    print("Chybí klíč v konfiguraci senzoru:", e)
+    return None
+```
+
+`ValueError` tedy propaguje do `SensorManager.__init__()` a pak do top-level handleru. V kombinaci s A1 způsobí trvalé zaseknutí zařízení. Záměr validace z F0 (vrátit `None` místo pádu) nebyl dotažen.
+
+**Doporučení:** Zachytávat `(KeyError, ValueError)` v `create_sensor()`.
+
+---
+
+#### A4 — `getaddrinfo()` bez timeoutu v TCP pre-testu
+
+**Soubor:** `main.py:259`
+
+```python
+addr = usocket.getaddrinfo(config.MQTT_BROKER, config.MQTT_PORT)[0][-1]
+```
+
+Pro IP adresu (jako v dodaném příkladu) jde o přímý lookup — žádný problém. Pro hostname by DNS dotaz bez timeoutu zablokoval vlákno na neurčito bez krmení WDT.
+
+**Doporučení:** Dokumentovat omezení v `config.py.example` (použít vždy IP adresu), nebo přidat poznámku do kódu.
+
+---
+
+### Nízká závažnost
+
+#### A5 — `client.sock.settimeout()` — privátní API `umqtt.simple`
+
+**Soubor:** `main.py:287`
+
+`umqtt.simple.MQTTClient` po `connect()` exponuje atribut `.sock`. Ten není součástí veřejného API. Při aktualizaci knihovny selže tiše — `AttributeError` zachytí obecný `BaseException` handler a interpretuje to jako selhání připojení.
+
+**Doporučení:** Okomentovat jako záměrný hack se zdůvodněním.
+
+---
+
+#### A6 — `retain=False` pro `status_topic` — rozporuje dokumentaci
+
+**Soubor:** `main.py:415`
+
+`CLAUDE.md` dokumentuje: *"both `retain=True`"*. Kód používá `retain=False` pro status. Subscriber připojující se po posledním publish neuvidí aktuální stav senzoru.
+
+Jde buď o záměrnou odchylku (pak opravit dokumentaci), nebo o bug (pak opravit kód).
+
+---
+
+## Audit #1 — verze 1.1.4
+
+**Datum:** 2026-03-21
+**Soubory:** `main.py`, `postgres-push/mqtt_to_postgres.py`
+
+### Opraveno
+
+| ID | Popis | Stav |
+|----|-------|------|
+| F0 | `PiraniSensor`: validace konfigurace přidána do `__init__()` | OPRAVENO |
+| F1 | `mqtt_to_postgres.py`: kompatibilita s `paho-mqtt` 1.x i 2.x (`on_connect` podpis) | OPRAVENO |
+| F2 | `connect_mqtt()`: potenciální použití nedefinované proměnné `client` | OPRAVENO |
+| F3 | Nesoulad `README.md` s implementací | OPRAVENO |
+
+### Otevřené nálezy (přeneseno do auditu #2 nebo stále aktuální)
+
+| ID  | Závažnost | Popis | Stav |
+|-----|-----------|-------|------|
+| R1  | NÍZKÁ     | `flush_buffer`: WDT feed jen každých 10 zpráv — při vysoké latenci MQTT může překročit `WDT_TIMEOUT_MS` | Otevřeno |
+| D1  | INFO      | Status topic se neukládá do bufferu při výpadku MQTT (záměr, ale není okomentováno) | Otevřeno |
+| D2  | INFO      | `_pub_buffer.pop(0)` je O(n) — přijatelné pro limit 200, problematické při růstu | Otevřeno |
+| D3  | INFO      | `mqtt_to_postgres.py`: chybí volitelná MQTT autentizace | Otevřeno |
+| D4  | INFO      | `mqtt_to_postgres.py`: backoff se neresetuje po úspěšném insertu, jen po reconnectu | Otevřeno |
+
+### Ověřená správnost (v1.1.4)
 
 | Oblast | Výsledek |
 |--------|----------|
 | `_last_sunday` — výpočet poslední neděle | Správně ✓ |
 | `cet_offset` — přechody CET/CEST | Správně ✓ |
-| `show_value` — formátování na 4-digit TM1637 | Správně ✓ |
+| `show_value` — formátování na 4-digit TM1637 (vč. záporných hodnot) | Správně ✓ |
 | ADC průměrování `sum(vals) // len(vals)` | Správně ✓ |
 | `ticks_diff` polarita v reconnect logice | Správně ✓ |
 | `mqtt_to_postgres.py` — `on_connect` kompatibilita s `paho-mqtt` 1.x i 2.x | Správně ✓ |

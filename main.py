@@ -15,7 +15,7 @@ import gc
 import usocket
 import config
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -146,11 +146,14 @@ class SharedResources:
             return False
 
     def _sync_ntp(self):
-        """Synchronizace RTC přes NTP"""
+        """Synchronizace RTC přes NTP, přepočítá utc_offset"""
         try:
             ntptime.timeout = 5
             ntptime.settime()
-            print("NTP OK:", time.gmtime()[:6])
+            t = time.gmtime()
+            self.utc_offset = cet_offset(t)
+            self._offset_day = t[2]
+            print("NTP OK:", t[:6])
         except Exception as e:
             print("NTP CHYBA:", e)
 
@@ -533,8 +536,8 @@ def create_sensor(shared, cfg):
         return None
     try:
         return cls(shared, cfg)
-    except KeyError as e:
-        print("Chybí klíč v konfiguraci senzoru:", e)
+    except (KeyError, ValueError) as e:
+        print("Chybná konfigurace senzoru:", e)
         return None
 
 
@@ -636,8 +639,11 @@ class SensorManager:
 
             t = time.gmtime()
             if t[3] >= 1 and t[2] != self.shared._offset_day:
-                self.shared.utc_offset = cet_offset(t)
-                self.shared._offset_day = t[2]
+                if self.shared.wlan.isconnected():
+                    self.shared._sync_ntp()
+                else:
+                    self.shared.utc_offset = cet_offset(t)
+                    self.shared._offset_day = t[2]
 
             wifi_ok = self.shared.check_wifi()
             if not wifi_ok:
