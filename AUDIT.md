@@ -2,21 +2,21 @@
 
 ---
 
-## Audit #2 — verze 1.2.0
+## Audit #2 — verze 1.2.0 → opraveno v 1.2.1
 
 **Datum:** 2026-03-29
 **Soubory:** `main.py`, `config.py.example`
 
 ### Souhrn závažnosti
 
-| ID  | Závažnost   | Popis |
-|-----|-------------|-------|
-| A1  | KRITICKÁ    | WDT nespustí při selhání `__init__` — zařízení nerestartuje |
-| A2  | KRITICKÁ    | `utc_offset` neaktualizován po NTP sync — chybná razítka až 24 h |
-| A3  | STŘEDNÍ     | `ValueError` z `PiraniSensor.__init__()` nekachytaná v `create_sensor()` |
-| A4  | STŘEDNÍ     | `getaddrinfo()` bez timeoutu — blokuje WDT pro hostname |
-| A5  | NÍZKÁ       | `client.sock.settimeout()` — přístup k privátnímu API umqtt |
-| A6  | NÍZKÁ       | `retain=False` pro `status_topic` — rozporuje CLAUDE.md |
+| ID  | Závažnost   | Popis | Stav |
+|-----|-------------|-------|------|
+| A1  | KRITICKÁ    | WDT nespustí při selhání `__init__` — zařízení nerestartuje | Otevřeno |
+| A2  | KRITICKÁ    | `utc_offset` neaktualizován po NTP sync — chybná razítka až 24 h | **OPRAVENO v 1.2.1** |
+| A3  | STŘEDNÍ     | `ValueError` z `PiraniSensor.__init__()` nekachytaná v `create_sensor()` | **OPRAVENO v 1.2.1** |
+| A4  | STŘEDNÍ     | `getaddrinfo()` bez timeoutu — blokuje WDT pro hostname | Otevřeno |
+| A5  | NÍZKÁ       | `client.sock.settimeout()` — přístup k privátnímu API umqtt | Otevřeno |
+| A6  | NÍZKÁ       | `retain=False` pro `status_topic` — rozporuje CLAUDE.md | Otevřeno |
 
 ---
 
