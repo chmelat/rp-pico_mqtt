@@ -11,7 +11,7 @@
 
 | ID  | Závažnost   | Popis | Stav |
 |-----|-------------|-------|------|
-| A1  | KRITICKÁ    | WDT nespustí při selhání `__init__` — zařízení nerestartuje | Otevřeno |
+| A1  | ~~KRITICKÁ~~ | WDT nespustí při selhání `__init__` — zařízení nerestartuje | Není chyba — viz níže |
 | A2  | KRITICKÁ    | `utc_offset` neaktualizován po NTP sync — chybná razítka až 24 h | **OPRAVENO v 1.2.1** |
 | A3  | STŘEDNÍ     | `ValueError` z `PiraniSensor.__init__()` nekachytaná v `create_sensor()` | **OPRAVENO v 1.2.1** |
 | A4  | STŘEDNÍ     | `getaddrinfo()` bez timeoutu — blokuje WDT pro hostname | Otevřeno |
@@ -22,17 +22,13 @@
 
 ### Kritické chyby
 
-#### A1 — WDT nespustí při selhání `__init__`
+#### A1 — WDT nespustí při selhání `__init__` — UZAVŘENO jako záměrné chování
 
 **Soubor:** `main.py:627`
 
-`WDT` se inicializuje na začátku `SensorManager.run()`. Pokud `SensorManager.__init__()` vyhodí výjimku (špatná konfigurace, I2C chyba, neplatný parametr senzoru…), `run()` se nikdy nezavolá. WDT nikdy nespustí. Zařízení zůstane trvale zaseknuto na `E--5` bez auto-resetu.
+Selhání v `__init__` je téměř výhradně způsobeno chybnou konfigurací (`config.py`), která je statická. WDT reset by situaci nevyřešil — způsobil by nekonečnou reset smyčku bez možnosti diagnostiky. Zařízení zůstane na `E--5`, což je žádoucí: operátor vidí chybu a může ji opravit.
 
-Komentář `# WDT resetuje zařízení` (řádek 683) je v tomto případě nepravdivý.
-
-**Reprodukce:** Nastavit `u_divider: -1` v konfiguraci Pirani senzoru → `ValueError` v `PiraniSensor.__init__()` → `create_sensor()` ho nezachytí (viz A3) → `SensorManager.__init__()` selže → `run()` se nikdy nezavolá → WDT nikdy nespustí.
-
-**Doporučení:** Inicializovat WDT nejpozději na začátku `SharedResources.__init__()`, nebo přidat aktivní čekací smyčku ve `__main__` fatal handleru, která WDT nakrmí jednou a pak nechá expirovat.
+Oprava A3 (`ValueError` zachycena v `create_sensor()`) zároveň eliminuje nejpravděpodobnější příčinu pádu `__init__`.
 
 ---
 
