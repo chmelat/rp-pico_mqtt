@@ -11,36 +11,19 @@
 
 | ID | Závažnost | Popis | Stav |
 |----|-----------|-------|------|
-| B1 | STŘEDNÍ   | NTP selhání → `_offset_day` neaktualizován → retry každou sekundu po celý den | Otevřeno |
+| B1 | STŘEDNÍ   | NTP selhání → `_offset_day` neaktualizován → retry každou sekundu po celý den | **OPRAVENO v 1.2.4** |
 | B2 | NÍZKÁ     | Socket únik při selhání `disconnect()` — přechodný, GC opraví | Otevřeno |
 | B3 | INFO      | `gc.collect()` přeskočen při přetažené iteraci smyčky | Otevřeno |
 
 ---
 
-### B1 — NTP selhání způsobí opakování každou sekundu po celý den
+### B1 — NTP selhání způsobí opakování každou sekundu po celý den — OPRAVENO v 1.2.4
 
 **Soubor:** `main.py:641–646`
 
-Pokud `_sync_ntp()` selže (výjimka zachycena uvnitř), `_offset_day` se neaktualizuje. Podmínka v `run()` pak platí každou sekundu po celý zbytek dne:
+Pokud `_sync_ntp()` selhala, výjimka byla zachycena uvnitř a `_offset_day` se neaktualizoval. Podmínka v `run()` platila každou sekundu po celý zbytek dne — každý pokus blokoval smyčku až 5 sekund.
 
-```python
-if t[3] >= 1 and t[2] != self.shared._offset_day:  # True každou sekundu
-    if self.shared.wlan.isconnected():
-        self.shared._sync_ntp()  # selže, _offset_day zůstane starý
-```
-
-Každé volání `ntptime.settime()` čeká na UDP odpověď až 5 sekund (`ntptime.timeout = 5`). Efektivní interval smyčky se při NTP výpadku změní z 1 s na ~5 s po celý den. Neovlivní WDT (5 s < 8 s, WDT nakrmen na začátku iterace), ale způsobí zpomalení publikování senzorů a zbytečné UDP pakety každých 5 sekund.
-
-**Doporučení:**
-
-```python
-if t[3] >= 1 and t[2] != self.shared._offset_day:
-    if self.shared.wlan.isconnected():
-        self.shared._sync_ntp()
-    if self.shared._offset_day != t[2]:  # NTP selhalo nebo bez WiFi
-        self.shared.utc_offset = cet_offset(t)
-        self.shared._offset_day = t[2]
-```
+`_sync_ntp()` nyní vrací `True`/`False`. Volající v `run()` aplikuje fallback (lokální DST výpočet + aktualizace `_offset_day`) pokud WiFi není dostupná nebo NTP selže. Retry nastane až příští den.
 
 ---
 

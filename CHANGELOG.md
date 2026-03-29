@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## main.py 1.2.4
+
+### Fixed
+- `_sync_ntp()` now returns `True`/`False` to indicate success. On failure, the daily
+  trigger in `run()` falls back to a local DST calculation and updates `_offset_day`,
+  preventing repeated 5-second NTP retry attempts for the rest of the day.
+
 ## main.py 1.2.3
 
 ### Fixed
