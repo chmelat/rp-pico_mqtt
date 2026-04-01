@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## mqtt_to_postgres.py 1.0.3
+
+### Fixed
+- Permanent DB errors (duplicate key, sensor not found) now discard the failed batch instead
+  of re-queuing it. Previously, a single bad item caused an infinite retry loop requiring a
+  manual daemon restart.
+
 ## main.py 1.2.5
 
 ### Fixed

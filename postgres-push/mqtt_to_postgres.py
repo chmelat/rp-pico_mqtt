@@ -21,7 +21,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 QUEUE_MAX = 10_000
 #INSERT_SQL = (
 #    "INSERT INTO sensor_value (sensor_id, value, create_tms) "
@@ -68,6 +68,9 @@ def db_worker(conn_string, insert_queue, stop_event):
                 with conn.cursor() as cur:
                     cur.executemany(INSERT_SQL, batch)
                 log.debug("Inserted %d rows", len(batch))
+            except (psycopg2.errors.RaiseException, psycopg2.IntegrityError) as e:
+                log.warning("Discarding %d rows (permanent error): %s", len(batch), e)
+                conn.rollback()
             except Exception as e:
                 log.error("DB insert failed: %s", e)
                 # Return items to queue (prepend to preserve order)
