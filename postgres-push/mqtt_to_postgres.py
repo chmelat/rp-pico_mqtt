@@ -15,13 +15,15 @@ import threading
 import paho.mqtt.client as mqtt
 import psycopg2
 
+_PAHO_V2 = hasattr(mqtt, "CallbackAPIVersion")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
 )
 log = logging.getLogger(__name__)
 
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 QUEUE_MAX = 10_000
 #INSERT_SQL = (
 #    "INSERT INTO sensor_value (sensor_id, value, create_tms) "
@@ -46,7 +48,7 @@ def db_worker(conn_string, insert_queue, stop_event):
         if conn is None:
             try:
                 conn = psycopg2.connect(conn_string)
-                conn.autocommit = True
+                conn.autocommit = False
                 log.info("Connected to PostgreSQL")
                 backoff = 1
             except Exception as e:
@@ -67,6 +69,7 @@ def db_worker(conn_string, insert_queue, stop_event):
             try:
                 with conn.cursor() as cur:
                     cur.executemany(INSERT_SQL, batch)
+                conn.commit()
                 log.debug("Inserted %d rows", len(batch))
             except (psycopg2.errors.RaiseException, psycopg2.IntegrityError) as e:
                 log.warning("Discarding %d rows (permanent error): %s", len(batch), e)
@@ -137,7 +140,7 @@ def main():
     )
     worker.start()
 
-    client = mqtt.Client()
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1) if _PAHO_V2 else mqtt.Client()
     client.on_connect = on_connect
     client.on_message = on_message
     client.on_disconnect = on_disconnect
@@ -149,6 +152,9 @@ def main():
         client.loop_stop()
         stop_event.set()
         worker.join(timeout=10)
+        remaining = len(insert_queue)
+        if remaining:
+            log.warning("Shutdown with %d queued items not flushed", remaining)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)
