@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 QUEUE_MAX = 10_000
 #INSERT_SQL = (
 #    "INSERT INTO sensor_value (sensor_id, value, create_tms) "
@@ -132,23 +132,24 @@ def main():
         else:
             insert_queue.append((sensor_name, value))
 
-    def on_connect(client, userdata, flags, rc, *args):
-        if rc == 0:
+    def on_connect(client, userdata, flags, reason_code, properties=None):
+        if reason_code == 0:
             log.info("MQTT connected, subscribing to %s", topic)
             client.subscribe(topic)
         else:
-            log.warning("MQTT connect failed, rc=%d", rc)
+            log.warning("MQTT connect failed, rc=%s", reason_code)
 
-    def on_disconnect(client, userdata, rc):
+    def on_disconnect(client, userdata, flags_or_rc, reason_code=None, properties=None):
+        rc = reason_code if reason_code is not None else flags_or_rc
         if rc != 0:
-            log.warning("MQTT unexpected disconnect rc=%d", rc)
+            log.warning("MQTT unexpected disconnect rc=%s", rc)
 
     worker = threading.Thread(
         target=db_worker, args=(conn_string, insert_queue, stop_event), daemon=True
     )
     worker.start()
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1) if _PAHO_V2 else mqtt.Client()
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2) if _PAHO_V2 else mqtt.Client()
     client.on_connect = on_connect
     client.on_message = on_message
     client.on_disconnect = on_disconnect

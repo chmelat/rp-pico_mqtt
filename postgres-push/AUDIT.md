@@ -25,7 +25,7 @@
 - `mqtt.Client()` (line 140) without `CallbackAPIVersion` triggers a `DeprecationWarning` or error in paho-mqtt >= 2.0.
 - `on_disconnect(client, userdata, rc)` (line 131) lacks the `*args` catch present in `on_connect` (line 124), so it will break under v2 callback conventions.
 
-**Resolution:** Added runtime detection (`_PAHO_V2 = hasattr(mqtt, "CallbackAPIVersion")`) and conditional constructor using `CallbackAPIVersion.VERSION1` for paho v2, preserving backward compatibility with v1.
+**Resolution:** Added runtime detection (`_PAHO_V2 = hasattr(mqtt, "CallbackAPIVersion")`) and conditional constructor using `CallbackAPIVersion.VERSION2` for paho v2, with callback signatures compatible with both v1 and v2.
 
 ## B4 — Signal handler registered after `connect()`
 
