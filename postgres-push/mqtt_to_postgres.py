@@ -23,13 +23,14 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 QUEUE_MAX = 10_000
 #INSERT_SQL = (
 #    "INSERT INTO sensor_value (sensor_id, value, create_tms) "
 #    "SELECT id, %s, %s FROM sensor WHERE name = %s"
 #)
 INSERT_SQL = "SELECT insert_sensor_value(%s, %s, %s)"
+INSERT_SQL_NO_TS = "SELECT insert_sensor_value(%s, %s)"
 
 def load_config(path):
     cfg = configparser.ConfigParser()
@@ -68,7 +69,12 @@ def db_worker(conn_string, insert_queue, stop_event):
 
             try:
                 with conn.cursor() as cur:
-                    cur.executemany(INSERT_SQL, batch)
+                    batch_ts = [r for r in batch if len(r) == 3]
+                    batch_no_ts = [r for r in batch if len(r) == 2]
+                    if batch_ts:
+                        cur.executemany(INSERT_SQL, batch_ts)
+                    if batch_no_ts:
+                        cur.executemany(INSERT_SQL_NO_TS, batch_no_ts)
                 conn.commit()
                 log.debug("Inserted %d rows", len(batch))
             except (psycopg2.errors.RaiseException, psycopg2.IntegrityError) as e:
@@ -117,12 +123,14 @@ def main():
         try:
             parts = msg.payload.decode().split()
             value = float(parts[0])
-            ts = parts[1]
+            ts = " ".join(parts[1:]) or None
         except (ValueError, TypeError, IndexError):
             return
         sensor_name = t.removeprefix(strip_prefix)
-#        insert_queue.append((value, ts, sensor_name))
-        insert_queue.append((sensor_name, value, ts))
+        if ts:
+            insert_queue.append((sensor_name, value, ts))
+        else:
+            insert_queue.append((sensor_name, value))
 
     def on_connect(client, userdata, flags, rc, *args):
         if rc == 0:

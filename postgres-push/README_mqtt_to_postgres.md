@@ -1,10 +1,11 @@
 # mqtt_to_postgres — MQTT → PostgreSQL daemon
 
-Verze: `1.0.1`
+Verze: `1.0.5`
 
-Daemon čte senzorová data publikovaná Raspberry Pi Pico 2W přes MQTT a zapisuje
-je do PostgreSQL databáze. Navazuje na stávající C systém (DCON) a používá
-identický SQL pattern (`INSERT … SELECT`) jako `postgres_query.c`.
+Daemon čte senzorová data publikovaná přes MQTT a zapisuje je do PostgreSQL
+databáze. Zpracovává všechny zprávy v platném formátu (`hodnota [timestamp]`)
+na subscribovaných topicích. Timestamp je volitelný — bez něj se použije
+aktuální čas serveru.
 
 ---
 
@@ -74,7 +75,7 @@ INSERT proběhne bez chyby, ale nevloží žádný řádek — hodnota se tiše 
 connection = dbname=zircodb user=sensor password=senSor7489 host=10.0.0.8 port=5432
 
 [mqtt]
-broker = 10.10.0.43
+broker = 10.0.0.26
 port   = 1883
 topic  = sensor/#   # wildcard MQTT subscription
 
@@ -115,17 +116,21 @@ Daemon ignoruje:
 | payload neparsovatelný jako `float` | chybové řetězce, prázdné zprávy |
 
 Zpracovává pouze zprávy, kde:
-1. topic **nekončí** `/status`,
-2. první token payloadu lze převést na `float`, a
-3. druhý token payloadu obsahuje timestamp.
+1. topic **nekončí** `/status`, a
+2. první token payloadu lze převést na `float`.
+
+Timestamp (vše za hodnotou) je volitelný. Pokud chybí, DB použije `now()`.
+Podporované formáty timestampu: s oddělovačem `T` i s mezerou
+(`2026-03-19T14:23:01`, `2026-03-19 14:23:01`).
 
 Příklady z reálného provozu:
 
 ```
 sensor/L200h/status online       → IGNOROVÁNO (končí /status)
 sensor/L200h/pirani/status OK    → IGNOROVÁNO (končí /status)
-sensor/L200h/pirani 0.152 2026-03-19T14:23:01  → ULOŽENO jako L200h/pirani = 0.152
-sensor/L200h/p1 0.500 2026-03-19T14:23:02      → ULOŽENO jako L200h/p1 = 0.500
+sensor/L200h/pirani 0.152 2026-03-19T14:23:01  → ULOŽENO s timestamp z payloadu
+sensor/L200h/pirani 0.152 2026-03-19 14:23:01  → ULOŽENO s timestamp z payloadu
+sensor/L200h/p1 0.500                          → ULOŽENO s timestamp = now()
 ```
 
 ### Fronta
@@ -150,8 +155,11 @@ Běží paralelně s MQTT smyčkou.
 │  fronta neprázdná?                              │
 │    → vytáhnout batch (max 500 položek)          │
 │    → executemany(INSERT…SELECT, batch)          │
-│    → při chybě: vrátit batch do fronty,         │
-│                 uzavřít conn, backoff           │
+│    → permanentní chyba (IntegrityError aj.):    │
+│         → zahodit batch, rollback               │
+│    → transientní chyba:                         │
+│         → vrátit batch do fronty,               │
+│           uzavřít conn, backoff                 │
 │                                                 │
 │  fronta prázdná?                                │
 │    → spát 0.5 s                                 │
@@ -162,19 +170,21 @@ Backoff se resetuje na 1 s po každém úspěšném připojení.
 
 ### SQL pattern
 
-Identický s `postgres_query.c` (řádky 224–227):
+Vkládání hodnot je delegováno na PostgreSQL funkci s dvěma přetíženími:
 
 ```sql
-INSERT INTO sensor_value (sensor_id, value, create_tms)
-SELECT id, %s, %s FROM sensor WHERE name = %s
+-- s timestampem z payloadu
+SELECT insert_sensor_value(%s, %s, %s)   -- (sensor_name, value, timestamp)
+
+-- bez timestampu — DB použije now()
+SELECT insert_sensor_value(%s, %s)       -- (sensor_name, value)
 ```
 
 Parametry jsou předávány přes psycopg2 (`%s` placeholders) — SQL injection
 nehrozí, escaping zajišťuje knihovna.
 
-Časová značka se nepřepočítává na serveru daemona. Skript ji přebírá přímo
-z MQTT payloadu jako druhý token a ukládá ji do `create_tms`. Formát payloadu
-je tedy očekáván jako `hodnota timestamp`, například `0.152 2026-03-19T14:23:01`.
+Formát payloadu: `hodnota [timestamp]`, například `0.152 2026-03-19T14:23:01`
+nebo jen `0.152`. Timestamp může obsahovat oddělovač `T` i mezeru.
 
 ### Graceful shutdown
 
@@ -183,7 +193,8 @@ Na `SIGTERM` nebo `SIGINT` (Ctrl+C):
 1. Odpojí MQTT klienta a zastaví jeho smyčku.
 2. Nastaví `stop_event` — DB worker dopracuje zbývající frontu.
 3. Čeká max 10 s na dokončení DB workeru.
-4. Ukončí proces.
+4. Pokud ve frontě zůstaly nezapsané položky, zaloguje warning s jejich počtem.
+5. Ukončí proces.
 
 Data, která jsou ve frontě v okamžiku signálu, se tedy stihnou zapsat —
 za předpokladu, že DB je dostupná a timeout 10 s je dostatečný.
@@ -238,7 +249,7 @@ journalctl -u mqtt-to-postgres -f
 
 ```bash
 # Simulovat MQTT zprávu
-mosquitto_pub -h 10.10.0.43 -t sensor/L200h/pirani -m 0.152
+mosquitto_pub -h 10.0.0.26 -t sensor/L200h/pirani -m "0.152 2026-03-19T14:23:01"
 
 # Ověřit v DB
 psql "dbname=zircodb user=sensor password=senSor7489 host=10.0.0.8" -c "
@@ -279,21 +290,20 @@ python mqtt_to_postgres.py 2>&1 | grep -v DEBUG   # potlačit debug
 # nebo spustit s upravenou úrovní:
 ```
 
-Úroveň logování lze změnit editací `logging.basicConfig(level=logging.DEBUG, …)`
-v hlavičce souboru.
+Úroveň logování lze změnit editací `logging.basicConfig(level=logging.INFO, …)`
+v hlavičce souboru (např. na `logging.DEBUG` pro detailní výpis).
 
 ---
 
 ## Omezení a known issues
 
-- **Časová značka**: generuje se na straně daemona, ne Pica. Zpoždění způsobené
-  výpadkem DB nebo plnou frontou se projeví rozdílem `create_tms` a skutečného
-  času měření.
+- **Časová značka**: přebírá se z MQTT payloadu (vše za hodnotou). Pokud v payloadu
+  chybí, použije se serverový čas (`now()`). Pokud zdroj posílá nepřesný čas,
+  projeví se to přímo v `create_tms`.
 - **Přeplnění fronty**: při výpadku DB delším než cca `10 000 × interval_měření`
   se nejstarší data začnou zahazovat. Kapacita (`QUEUE_MAX = 10_000`) je
   konfigurovatelná přímo v kódu.
-- **Neznámý senzor**: pokud `sensor.name` neexistuje v tabulce `sensor`, INSERT
-  proběhne bez chyby, ale nevloží žádný řádek — hodnota se tiše ztratí. Viz
-  sekce Databázové schéma.
+- **Neznámý senzor**: chování při neexistujícím `sensor.name` závisí na
+  implementaci funkce `insert_sensor_value()` na straně PostgreSQL.
 - **Bez autentizace MQTT**: broker je předpokládán bez hesla. paho-mqtt podporuje
   `client.username_pw_set()` — přidejte do `[mqtt]` sekce a kódu dle potřeby.
