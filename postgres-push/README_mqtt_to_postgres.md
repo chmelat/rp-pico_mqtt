@@ -12,7 +12,34 @@ hodnoty průběžně.
 
 ---
 
-## Rychlý start
+## Formát MQTT zpráv
+
+Daemon zpracovává zprávy ve tvaru:
+
+```
+hodnota [timestamp]
+```
+
+Timestamp je volitelný. Pokud chybí, použije se aktuální čas serveru.
+
+Příklady:
+
+| MQTT topic | Payload | Co se stane |
+|---|---|---|
+| `sensor/L200h/pirani` | `0.152` | Uloží se s časem `now()` |
+| `sensor/L200h/pirani` | `0.152 2026-03-19T14:23:01` | Uloží se s daným časem |
+| `sensor/L200h/pirani` | `0.152 2026-03-19 14:23:01` | Totéž (mezera místo `T`) |
+| `sensor/L200h/pirani` | `0.152 2026-03-19T14:23:01.274` | Timestamp se zlomky sekund |
+| `sensor/L200h/pirani/status` | `OK` | Ignorováno (topic končí `/status`) |
+| `sensor/L200h/status` | `online` | Ignorováno (topic končí `/status`) |
+
+Ignorují se:
+- Zprávy na topicích končících `/status` (stavové zprávy senzorů).
+- Zprávy, kde payload není číslo.
+
+---
+
+## Instalace
 
 ### 1. Nainstaluj závislosti
 
@@ -37,7 +64,7 @@ Obsah souboru `mqtt_push.cfg`:
 connection = dbname=zircodb user=sensor password=heslo host=10.0.0.8 port=5432
 
 [mqtt]
-broker = 10.10.0.43
+broker = 10.0.0.26
 port   = 1883
 topic  = sensor/#
 
@@ -51,7 +78,7 @@ strip_prefix = sensor/
   Například: topic `sensor/L200h/pirani` → po oříznutí `sensor/` → v DB se hledá
   senzor s názvem `L200h/pirani`.
 
-### 3. Spusť
+### 3. Spusť ručně (pro test)
 
 ```bash
 python mqtt_to_postgres.py mqtt_push.cfg
@@ -59,57 +86,7 @@ python mqtt_to_postgres.py mqtt_push.cfg
 
 Bez argumentu hledá `mqtt_push.cfg` v aktuálním adresáři. Ukončení: `Ctrl+C`.
 
-### 4. Ověř, že to funguje
-
-Pošli testovací zprávu do MQTT:
-
-```bash
-mosquitto_pub -h 10.10.0.43 -t sensor/L200h/pirani -m "0.152"
-```
-
-Zkontroluj v databázi:
-
-```bash
-psql "dbname=zircodb user=sensor host=10.0.0.8" -c \
-  "SELECT s.name, sv.value, sv.create_tms
-   FROM sensor_value sv JOIN sensor s ON s.id = sv.sensor_id
-   ORDER BY sv.create_tms DESC LIMIT 5;"
-```
-
----
-
-## Formát MQTT zpráv
-
-Daemon zpracovává zprávy ve tvaru:
-
-```
-hodnota [timestamp]
-```
-
-Timestamp je volitelný. Pokud chybí, použije se aktuální čas serveru.
-
-Příklady:
-
-| MQTT topic | Payload | Co se stane |
-|---|---|---|
-| `sensor/L200h/pirani` | `0.152` | Uloží se s časem `now()` |
-| `sensor/L200h/pirani` | `0.152 2026-03-19T14:23:01` | Uloží se s daným časem |
-| `sensor/L200h/pirani` | `0.152 2026-03-19 14:23:01` | Totéž (mezera místo `T`) |
-| `sensor/L200h/pirani/status` | `OK` | Ignorováno (topic končí `/status`) |
-| `sensor/L200h/status` | `online` | Ignorováno (topic končí `/status`) |
-
-Ignorují se:
-- Zprávy na topicích končících `/status` (stavové zprávy senzorů).
-- Zprávy, kde payload není číslo.
-
----
-
-## Instalace jako systemd service
-
-Pro trvalý provoz na serveru. Daemon poběží na pozadí, automaticky se spustí
-po restartu a při pádu se restartuje.
-
-### 1. Zkopíruj soubory
+### 4. Zkopíruj soubory pro systemd
 
 ```bash
 sudo cp mqtt_to_postgres.py /usr/local/bin/
@@ -117,7 +94,7 @@ sudo cp mqtt_push.cfg       /usr/local/etc/
 sudo chmod 644 /usr/local/etc/mqtt_push.cfg
 ```
 
-### 2. Nainstaluj a spusť service
+### 5. Nainstaluj a spusť service
 
 ```bash
 sudo cp mqtt-to-postgres.service /etc/systemd/system/
@@ -125,7 +102,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now mqtt-to-postgres
 ```
 
-### 3. Kontrola
+### 6. Kontrola
 
 ```bash
 sudo systemctl status mqtt-to-postgres    # stav
@@ -196,41 +173,10 @@ Formát: `YYYY-MM-DD HH:MM:SS LEVEL zpráva`. Příklady:
 
 ---
 
-## Příloha: Databázové schéma
+## Příloha: Databázová funkce
 
-Daemon nic v DB nevytváří — předpokládá existující tabulky a funkce.
-
-### Potřebné tabulky
-
-```sql
-CREATE TABLE sensor (
-    id   SERIAL PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL
-);
-
-CREATE TABLE sensor_value (
-    sensor_id  INTEGER REFERENCES sensor(id),
-    value      DOUBLE PRECISION,
-    create_tms TIMESTAMPTZ
-);
-```
-
-### Registrace senzorů
-
-Pro každý MQTT topic musí existovat odpovídající záznam v tabulce `sensor`.
-Jméno = topic bez prefixu:
-
-```sql
-INSERT INTO sensor (name) VALUES ('L200h/pirani');
-INSERT INTO sensor (name) VALUES ('L200h/p1');
-```
-
-Pokud senzor v tabulce chybí, zápis hodnoty selže (funkce
-`insert_sensor_value` vyhodí výjimku) a batch se zahodí.
-
-### SQL funkce
-
-Daemon volá PostgreSQL funkci `insert_sensor_value` ve dvou variantách:
+Daemon nic v DB nevytváří — předpokládá existující funkci `insert_sensor_value`,
+kterou volá ve dvou variantách:
 
 ```sql
 -- s timestampem
@@ -239,6 +185,9 @@ SELECT insert_sensor_value('L200h/pirani', 0.152, '2026-03-19 14:23:01');
 -- bez timestampu (použije now())
 SELECT insert_sensor_value('L200h/pirani', 0.152);
 ```
+
+Pro každý MQTT topic musí existovat odpovídající senzor v databázi (jméno =
+topic bez prefixu). Pokud senzor chybí, funkce vyhodí výjimku a batch se zahodí.
 
 Definice funkcí jsou v souboru `sensor_value_functions.sql`.
 
