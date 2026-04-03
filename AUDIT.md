@@ -2,6 +2,85 @@
 
 ---
 
+## Audit #4 — hloubkový audit (verze 1.2.5)
+
+**Datum:** 2026-04-03
+**Soubory:** `main.py`
+
+### Souhrn závažnosti
+
+| ID | Závažnost | Popis | Stav |
+|----|-----------|-------|------|
+| N3 | NÍZKÁ-STŘEDNÍ | `flush_buffer` WDT starvation: 10 × 2s socket timeout > 8s WDT | Otevřeno |
+| N4 | NÍZKÁ | `show_value` display overflow pro hraniční záporné hodnoty | Otevřeno |
+| N6 | NÍZKÁ | `ntptime.settime()` blokuje až 5s bez WDT feed (margín 3s) | Otevřeno |
+
+---
+
+### N3 — `flush_buffer` WDT starvation při pomalém brokeru (NÍZKÁ-STŘEDNÍ)
+
+**Soubor:** `main.py:342–358`
+
+WDT se krmí každých 10 odeslaných zpráv (line 347–348). Socket timeout je 2s (line 295). Pokud broker přijímá TCP ale odpovídá pomalu, 10 publish × 2s = 20s bez WDT feed > `WDT_TIMEOUT_MS` (8s) → neplánovaný restart.
+
+R1 z auditu #1 — stále otevřeno, nyní lépe kvantifikováno.
+
+**Doporučení:** Krmit WDT před každým publish:
+
+```python
+while self._pub_buffer:
+    if self.wdt:
+        self.wdt.feed()
+    topic, payload, retain = self._pub_buffer[0]
+```
+
+---
+
+### N4 — `show_value` overflow pro hraniční záporné hodnoty (NÍZKÁ)
+
+**Soubor:** `main.py:360–377`
+
+Pokud `value = -9.995`, `"{:.2f}".format(-9.995)` → `"-10.00"` (5 znaků pro 4 pozice displeje). Zaokrouhlení formátovacím řetězcem posune hodnotu přes hranici `-10`, kde se přepne na `"{:.1f}"`, ale formátování proběhlo ještě v původní větvi.
+
+V praxi senzory nevracejí záporné hodnoty (p_min ≥ 0, pirani p_min = 1e-4). Problém nastane jen při konfiguraci záporného rozsahu.
+
+---
+
+### N6 — `ntptime.settime()` blokuje až 5s bez WDT feed (NÍZKÁ)
+
+**Soubor:** `main.py:148–159`
+
+`ntptime.timeout = 5` a pak `ntptime.settime()` blokuje celý timeout bez krmení WDT. 5s < 8s WDT timeout, ale margín je jen 3s.
+
+**Doporučení:** Snížit `ntptime.timeout` na 3, nebo přidat WDT feed před volání.
+
+---
+
+### Ověřená správnost (v1.2.5)
+
+| Oblast | Výsledek |
+|--------|----------|
+| `_last_sunday` — weekday aritmetika pro měsíc 3 a 10 | Správně ✓ |
+| `cet_offset` — přechod CET↔CEST na poslední neděli v 01:00 UTC | Správně ✓ |
+| `time.mktime` na Pico — bez TZ, `mktime` = inverse of `gmtime` | Správně ✓ |
+| `ticks_ms()` aritmetika — všude `ticks_diff`/`ticks_add` | Správně ✓ |
+| `_sync_ntp` aktualizuje `utc_offset` i `_offset_day` | Správně ✓ |
+| `_close_mqtt` socket cleanup fallback | Správně ✓ |
+| `connect_mqtt` — `BaseException` catch s re-raise kritických | Správně ✓ |
+| `_btn_irq` → `micropython.schedule` — korektní ISR deferral | Správně ✓ |
+| Buffer bounded na `PUBLISH_BUFFER_MAX` | Správně ✓ |
+
+### Stav předchozích otevřených nálezů
+
+| ID | Popis | Stav |
+|----|-------|------|
+| B3 | `gc.collect()` přeskočen při přetažené iteraci | Otevřeno (INFO) |
+| R1 | `flush_buffer` WDT starvation | Otevřeno → upřesněno jako N3 |
+| D1 | Status topic se nebufferuje | Otevřeno (záměr) |
+| D2 | `_pub_buffer.pop(0)` je O(n) | Otevřeno (OK pro limit 200) |
+
+---
+
 ## Audit #3 — dlouhodobý provoz (verze 1.2.3)
 
 **Datum:** 2026-03-29

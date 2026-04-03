@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-VERSION = "1.0.6"
+VERSION = "1.0.7"
 QUEUE_MAX = 10_000
 #INSERT_SQL = (
 #    "INSERT INTO sensor_value (sensor_id, value, create_tms) "
@@ -78,8 +78,22 @@ def db_worker(conn_string, insert_queue, stop_event):
                 conn.commit()
                 log.debug("Inserted %d rows", len(batch))
             except (psycopg2.errors.RaiseException, psycopg2.IntegrityError) as e:
-                log.warning("Discarding %d rows (permanent error): %s", len(batch), e)
                 conn.rollback()
+                log.warning("Batch failed (%s), retrying %d rows individually", e, len(batch))
+                saved = 0
+                discarded = 0
+                for row in batch:
+                    try:
+                        with conn.cursor() as cur:
+                            sql = INSERT_SQL if len(row) == 3 else INSERT_SQL_NO_TS
+                            cur.execute(sql, row)
+                        conn.commit()
+                        saved += 1
+                    except (psycopg2.errors.RaiseException, psycopg2.IntegrityError) as e2:
+                        conn.rollback()
+                        discarded += 1
+                        log.debug("Discarding row %s: %s", row[0], e2)
+                log.info("Row-by-row: saved %d, discarded %d", saved, discarded)
             except Exception as e:
                 log.error("DB insert failed: %s", e)
                 # Return items to queue (prepend to preserve order)
@@ -153,8 +167,6 @@ def main():
     client.on_connect = on_connect
     client.on_message = on_message
     client.on_disconnect = on_disconnect
-    client.connect(broker, port, keepalive=60)
-
     def shutdown(signum, frame):
         log.info("Shutting down...")
         client.disconnect()
@@ -168,6 +180,8 @@ def main():
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
+
+    client.connect(broker, port, keepalive=60)
 
     client.loop_forever()
 

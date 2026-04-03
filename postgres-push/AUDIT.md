@@ -1,4 +1,75 @@
-# Audit: mqtt_to_postgres.py v1.0.3
+# Audit: mqtt_to_postgres.py
+
+---
+
+## Audit #2 — hloubkový audit (v1.0.6)
+
+**Date:** 2026-04-03
+
+### Souhrn závažnosti
+
+| ID | Závažnost | Popis | Stav |
+|----|-----------|-------|------|
+| N1 | ~~STŘEDNÍ~~ | `executemany` zahazuje celý batch kvůli jednomu špatnému řádku | **OPRAVENO** |
+| N2 | ~~STŘEDNÍ~~ | `client.connect()` bez timeoutu + signal handlers až po connect | **OPRAVENO** |
+| N5 | ~~NÍZKÁ~~ | `db_worker` backoff neresetován po úspěšném insertu | **False positive** |
+
+---
+
+### N1 — `executemany` zahazuje celý batch kvůli jednomu špatnému řádku — OPRAVENO
+
+**Severity: Medium** — **Fixed 2026-04-03**
+
+`executemany` vkládá až 500 řádků v jedné transakci. Pokud `insert_sensor_value` vyhodí `RaiseException` pro jeden řádek (neznámý senzor, neplatný timestamp), celý batch se zahazoval.
+
+**Resolution:** Po `RaiseException`/`IntegrityError` se batch rollbackne a zkusí se row-by-row retry. Každý řádek vlastní transakce — dobrý commit, špatný rollback + discard. Žádný řádek se nevrací do fronty → nedochází k duplikátům (neporušuje atomicitu opravu B2).
+
+---
+
+### N2 — `client.connect()` bez timeoutu + signal handlers až po connect — OPRAVENO
+
+**Severity: Medium** — **Fixed 2026-04-03**
+
+`client.connect(broker, port)` blokoval na TCP connect bez explicitního timeoutu. Signal handlers se registrovaly až po connect. Pokud byl broker nedostupný, SIGTERM/SIGINT nemohl proces gracefully ukončit.
+
+B4 z auditu #1.
+
+**Resolution:** Signal handlers přesunuty před `client.connect()`.
+
+---
+
+### N5 — `db_worker` backoff neresetován po úspěšném insertu — FALSE POSITIVE
+
+Transientní chyba vždy nastaví `conn = None`, což vynutí reconnect. Úspěšný reconnect resetuje `backoff = 1` (line 54). Backoff nikdy nezůstane navýšený po obnovení spojení.
+
+D4 z auditu #1 — uzavřeno.
+
+---
+
+### Ověřená správnost (v1.0.6)
+
+| Oblast | Výsledek |
+|--------|----------|
+| Parameterized queries (SQL injection safe) | Správně ✓ |
+| `on_connect` resubscribes po reconnectu | Správně ✓ |
+| `deque` operace thread-safe pod GIL | Správně ✓ |
+| Batch split TS/no-TS pro dva SQL dotazy | Správně ✓ |
+| Transientní chyba → batch zpět do fronty (zachovává pořadí) | Správně ✓ |
+
+### Stav předchozích otevřených nálezů
+
+| ID | Popis | Stav |
+|----|-------|------|
+| B1 | `deque` thread safety relies on GIL | Otevřeno (Low) |
+| B4 | Signal handler po connect | **Opraveno** → N2 |
+| B6 | Silent drop špatných MQTT zpráv | Otevřeno (Low) |
+| B7 | Silent discard při plné queue | Otevřeno (Low) |
+| D3 | Chybí MQTT autentizace | Otevřeno (INFO) |
+| D4 | Backoff neresetován po insertu | **False positive** → N5 |
+
+---
+
+## Audit #1 — v1.0.3
 
 **Date:** 2026-04-01
 
