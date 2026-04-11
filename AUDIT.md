@@ -16,7 +16,7 @@
 | S2 | STŘEDNÍ | WiFi credentials v `config.py` jako plaintext | Otevřeno (omezení platformy) |
 | S3 | NÍZKÁ | Diagnostika zveřejňuje interní stav zařízení bez access control | Otevřeno |
 | S4 | NÍZKÁ | `mqtt_to_postgres`: diag JSON tiše zahozen jako unparseable message | Otevřeno |
-| S5 | NÍZKÁ | `ticks_ms` uptime overflow po ~24.8 dnech | Otevřeno |
+| S5 | ~~NÍZKÁ~~ | `ticks_ms` uptime overflow po ~12.4 dnech | **OPRAVENO** |
 | N3 | NÍZKÁ-STŘEDNÍ | `flush_buffer` WDT starvation (z auditu #4) | Otevřeno |
 | N4 | NÍZKÁ | `show_value` display overflow pro hraniční záporné hodnoty (z auditu #4) | Otevřeno |
 | N6 | NÍZKÁ | `ntptime.settime()` blokuje až 5s bez WDT feed (z auditu #4) | Otevřeno |
@@ -88,27 +88,13 @@ if t.endswith("/status") or t.endswith("/diag"):
 
 ---
 
-### S5 — `ticks_ms` uptime overflow po ~24.8 dnech (NÍZKÁ)
+### S5 — `ticks_ms` uptime overflow po ~12.4 dnech — OPRAVENO
 
-**Soubor:** `main.py:618–619`
+**Soubor:** `main.py`
 
-```python
-uptime = time.ticks_diff(now, self.shared._boot_ticks) // 1000
-```
+`ticks_ms()` na RP2350 je 30-bit. `ticks_diff` vrací zápornou hodnotu po ~12.4 dnech → diagnostický uptime by byl chybný.
 
-`ticks_ms()` na RP2040/RP2350 je 30-bit unsigned (0 – 2^30-1 ≈ 1 073 741 823 ms ≈ 12.4 dní). `ticks_diff` vrací signed hodnotu v rozsahu [-2^29, 2^29-1]. Po ~12.4 dnech `ticks_diff` vrátí záporné číslo → uptime bude záporný.
-
-**Poznámka:** Toto neovlivňuje žádnou jinou logiku — všechna ostatní `ticks_diff` použití pracují s krátkými intervaly (backoff, ping, deadline). Pouze diagnostický `uptime` bude po ~12 dnech chybný.
-
-**Doporučení:** Použít vlastní čítač inkrementovaný v hlavní smyčce:
-
-```python
-# v SensorManager.__init__:
-self._uptime_s = 0
-
-# v run() smyčce:
-self._uptime_s += config.INTERVAL_S
-```
+**Řešení:** Nahrazeno vlastním čítačem `_uptime_s` v `SensorManager`, inkrementovaným o `INTERVAL_S` každou iteraci hlavní smyčky. MicroPython `int` je arbitrary precision — žádný overflow.
 
 ---
 

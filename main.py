@@ -76,7 +76,6 @@ class SharedResources:
 
     def __init__(self):
         self.wdt = None
-        self._boot_ticks = time.ticks_ms()
         self.reconn_wifi = 0
         self.reconn_mqtt = 0
         self._mqtt_ever_connected = False
@@ -575,6 +574,7 @@ class SensorManager:
 
         self._conn_error = None  # ERR_WIFI nebo ERR_MQTT
         self._diag_counter = 0
+        self._uptime_s = 0
 
         # LED piny (paralelní list k self.sensors)
         self._leds = []
@@ -615,8 +615,7 @@ class SensorManager:
 
     def _publish_diag(self):
         """Publikování diagnostických informací jako JSON"""
-        now = time.ticks_ms()
-        uptime = time.ticks_diff(now, self.shared._boot_ticks) // 1000
+        uptime = self._uptime_s
         diag = {
             "uptime": uptime,
             "mem": gc.mem_free(),
@@ -669,6 +668,7 @@ class SensorManager:
 
         while True:
             self.shared.wdt.feed()
+            self._uptime_s += config.INTERVAL_S
             loop_start = time.ticks_ms()
 
             t = time.gmtime()
