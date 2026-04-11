@@ -2,6 +2,150 @@
 
 ---
 
+## Audit #5 — bezpečnostní audit (verze 1.2.6)
+
+**Datum:** 2026-04-11
+**Soubory:** `main.py`, `config.py.example`, `postgres-push/mqtt_to_postgres.py`
+**Zaměření:** Bezpečnost, nové diagnostické funkce, stav předchozích nálezů
+
+### Souhrn závažnosti
+
+| ID | Závažnost | Popis | Stav |
+|----|-----------|-------|------|
+| S1 | STŘEDNÍ | MQTT bez autentizace — kdokoliv v síti může publikovat falešná data | Otevřeno |
+| S2 | STŘEDNÍ | WiFi credentials v `config.py` jako plaintext | Otevřeno (omezení platformy) |
+| S3 | NÍZKÁ | Diagnostika zveřejňuje interní stav zařízení bez access control | Otevřeno |
+| S4 | NÍZKÁ | `mqtt_to_postgres`: diag JSON tiše zahozen jako unparseable message | Otevřeno |
+| S5 | NÍZKÁ | `ticks_ms` uptime overflow po ~24.8 dnech | Otevřeno |
+| N3 | NÍZKÁ-STŘEDNÍ | `flush_buffer` WDT starvation (z auditu #4) | Otevřeno |
+| N4 | NÍZKÁ | `show_value` display overflow pro hraniční záporné hodnoty (z auditu #4) | Otevřeno |
+| N6 | NÍZKÁ | `ntptime.settime()` blokuje až 5s bez WDT feed (z auditu #4) | Otevřeno |
+
+---
+
+### S1 — MQTT bez autentizace (STŘEDNÍ)
+
+**Soubory:** `main.py:294–297`, `postgres-push/mqtt_to_postgres.py:184`
+
+`MQTTClient` a `paho.mqtt.Client` se připojují bez username/password a bez TLS. Kdokoliv v lokální síti může:
+- **Publikovat** falešné senzorové hodnoty na `sensor/+/+` — `mqtt_to_postgres` je uloží do DB bez ověření autenticity
+- **Subscribovat** a číst senzorová data a diagnostiku
+- **Publikovat** na `MQTT_STATUS_TOPIC` → falešný "offline" status
+
+`umqtt.simple.MQTTClient` podporuje `user` a `password` parametry. Mosquitto podporuje ACL. TLS je na Pico 2W možný přes `ssl.wrap_socket()`.
+
+**Riziko:** Závisí na síťové segmentaci. V izolované průmyslové síti nízké, ve sdílené síti střední.
+
+**Doporučení:**
+1. Přidat volitelné `MQTT_USER` / `MQTT_PASSWORD` do config
+2. Na brokeru nastavit ACL (pico smí jen publish na `sensor/<id>/#`, mqtt_to_postgres smí subscribe)
+
+---
+
+### S2 — WiFi credentials jako plaintext (STŘEDNÍ)
+
+**Soubor:** `config.py`
+
+SSID a heslo jsou v `config.py` jako plaintext. `config.py` je v `.gitignore` (šablona je `config.py.example`), ale:
+- Při kopírování `mpremote cp` je heslo viditelné v historii shellu
+- Na Pico filesystem je čitelné přes `mpremote` bez autentizace (fyzický USB přístup)
+
+**Omezení platformy:** MicroPython nemá keystore/secure storage API. Pico 2W nemá hardware secure element.
+
+**Doporučení:** Přijatelné riziko pro embedded zařízení s fyzickým přístupem. Zajistit, že `config.py` je v `.gitignore`.
+
+---
+
+### S3 — Diagnostika zveřejňuje interní stav (NÍZKÁ)
+
+**Soubor:** `main.py:616–633`
+
+`_publish_diag()` publikuje na MQTT:
+- `mem` — volná paměť (informace o zátěži zařízení)
+- `reconn_wifi` / `reconn_mqtt` — počet reconnectů (indikátor nestability sítě)
+- `ver` — verze firmware (útočník zjistí, proti čemu útočí)
+
+Bez MQTT autentizace (S1) jsou tato data čitelná kýmkoliv v síti.
+
+**Riziko:** Nízké. Zařízení nemá shell, web server ani jiný vstupní vektor. Informace nemají praktickou hodnotu pro útok na Pico samotné. Relevantní pouze pokud S1 není vyřešeno.
+
+---
+
+### S4 — `mqtt_to_postgres` tiše zahazuje diag JSON (NÍZKÁ)
+
+**Soubor:** `postgres-push/mqtt_to_postgres.py:133–142`
+
+Topic `sensor/L200h/diag` nekončí na `/status`, takže projde filtrem (řádek 135). Payload `{"uptime":...}` selže na `float(parts[0])` → `ValueError` → `return`. Zpráva se tiše zahodí.
+
+Funkčně neškodí — diag data nepatří do `sensor_value` tabulky. Ale zvyšuje objem tichých dropů (B6 z auditu #1).
+
+**Doporučení:** Přidat filtr pro `/diag` topic vedle `/status`:
+
+```python
+if t.endswith("/status") or t.endswith("/diag"):
+    return
+```
+
+---
+
+### S5 — `ticks_ms` uptime overflow po ~24.8 dnech (NÍZKÁ)
+
+**Soubor:** `main.py:618–619`
+
+```python
+uptime = time.ticks_diff(now, self.shared._boot_ticks) // 1000
+```
+
+`ticks_ms()` na RP2040/RP2350 je 30-bit unsigned (0 – 2^30-1 ≈ 1 073 741 823 ms ≈ 12.4 dní). `ticks_diff` vrací signed hodnotu v rozsahu [-2^29, 2^29-1]. Po ~12.4 dnech `ticks_diff` vrátí záporné číslo → uptime bude záporný.
+
+**Poznámka:** Toto neovlivňuje žádnou jinou logiku — všechna ostatní `ticks_diff` použití pracují s krátkými intervaly (backoff, ping, deadline). Pouze diagnostický `uptime` bude po ~12 dnech chybný.
+
+**Doporučení:** Použít vlastní čítač inkrementovaný v hlavní smyčce:
+
+```python
+# v SensorManager.__init__:
+self._uptime_s = 0
+
+# v run() smyčce:
+self._uptime_s += config.INTERVAL_S
+```
+
+---
+
+### Ověřená správnost (v1.2.6)
+
+| Oblast | Výsledek |
+|--------|----------|
+| `config.py.example` — nové klíče `DIAG_INTERVAL`, `DIAG_TOPIC` | Správně ✓ |
+| `_publish_diag()` — žádný blocking, žádná alokace mimo dict + json.dumps | Správně ✓ |
+| `_publish_diag()` — RSSI čtení v try/except (neimplementováno na všech FW) | Správně ✓ |
+| `reconn_wifi` — inkrementuje jen při reconnectu (ne při prvním connect) | Správně ✓ |
+| `reconn_mqtt` — `_mqtt_ever_connected` flag zabraňuje počítání prvního connect | Správně ✓ |
+| `_diag_counter` — korektní reset, `DIAG_INTERVAL=0` vypne diagnostiku | Správně ✓ |
+| `json.dumps(diag)` — MicroPython `json` modul dostupný na RP2350 | Správně ✓ |
+| `config.py` v `.gitignore` (credentials nejsou v repo) | Správně ✓ |
+| Žádný user input v MQTT topic/payload (no injection vector) | Správně ✓ |
+| `publish()` konvertuje payload přes `str()` — žádné binární injection | Správně ✓ |
+| `mqtt_to_postgres` — parameterized SQL queries (žádné SQL injection) | Správně ✓ |
+| `mqtt_to_postgres` — `float()` parsing odmítne non-numeric payload | Správně ✓ |
+
+### Stav předchozích otevřených nálezů
+
+| ID | Popis | Stav |
+|----|-------|------|
+| N3 | `flush_buffer` WDT starvation | Otevřeno (NÍZKÁ-STŘEDNÍ) |
+| N4 | `show_value` overflow pro záporné hodnoty | Otevřeno (NÍZKÁ) |
+| N6 | `ntptime.settime()` blokuje 5s bez WDT feed | Otevřeno (NÍZKÁ) |
+| B3 | `gc.collect()` přeskočen při přetažené iteraci | Otevřeno (INFO) |
+| D1 | Status topic se nebufferuje | Otevřeno (záměr) |
+| D2 | `_pub_buffer.pop(0)` je O(n) | Otevřeno (OK pro limit 200) |
+| B1 | `mqtt_to_postgres`: deque thread safety závisí na GIL | Otevřeno (Low) |
+| B6 | `mqtt_to_postgres`: tiché zahazování špatných zpráv | Otevřeno (Low) — rozšířeno o S4 |
+| B7 | `mqtt_to_postgres`: tiché zahazování při plné queue | Otevřeno (Low) |
+| D3 | `mqtt_to_postgres`: chybí MQTT autentizace | Otevřeno (INFO) — souvisí s S1 |
+
+---
+
 ## Audit #4 — hloubkový audit (verze 1.2.5)
 
 **Datum:** 2026-04-03
