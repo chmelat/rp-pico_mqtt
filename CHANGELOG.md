@@ -9,6 +9,14 @@ All notable changes to this project will be documented in this file.
   of re-queuing it. Previously, a single bad item caused an infinite retry loop requiring a
   manual daemon restart.
 
+## main.py 1.2.6
+
+### Added
+- MQTT diagnostics: periodically publishes device health as JSON on `DIAG_TOPIC`
+  (uptime, free memory, WiFi RSSI, publish buffer size, WiFi/MQTT reconnect counts,
+  firmware version). Interval is configurable via `DIAG_INTERVAL` (number of measurement
+  cycles, 0 = disabled).
+
 ## main.py 1.2.5
 
 ### Fixed

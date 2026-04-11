@@ -293,6 +293,8 @@ Při inicializaci se provede I2C scan a ověří se přítomnost zařízení na 
 | `INTERVAL_S` | `1` | Interval měření v sekundách |
 | `WDT_TIMEOUT_MS` | `8000` | Timeout watchdogu v ms |
 | `PUBLISH_BUFFER_MAX` | `200` | Max. počet hodnot v zásobníku pro případ výpadku WiFi/MQTT |
+| `DIAG_INTERVAL` | `60` | Publikovat diagnostiku každých N cyklů (0 = vypnuto) |
+| `DIAG_TOPIC` | `"sensor/L200h/diag"` | MQTT topic pro diagnostiku |
 
 ### Senzory (SENSORS)
 
@@ -412,6 +414,24 @@ Stav senzoru (`status_topic`) je vždy přítomen a nabývá hodnot:
 | `"config_error"` | Neplatná konfigurace |
 
 Navíc se na `MQTT_STATUS_TOPIC` (LWT, `retain=True`) publikuje stav zařízení: `"online"` při startu, `"offline"` při neočekávaném odpojení.
+
+### Diagnostika
+
+Každých `DIAG_INTERVAL` měřicích cyklů se na `DIAG_TOPIC` publikuje JSON s diagnostikou zařízení (`retain=True`):
+
+```json
+{"uptime":3600,"rssi":-55,"mem":45000,"buf":3,"reconn_wifi":1,"reconn_mqtt":2,"ver":"1.2.6"}
+```
+
+| Klíč | Popis |
+|------|-------|
+| `uptime` | Doba běhu v sekundách |
+| `rssi` | WiFi síla signálu (dBm), pouze při připojení |
+| `mem` | Volná paměť (bajty) |
+| `buf` | Počet zpráv v publish zásobníku |
+| `reconn_wifi` | Počet WiFi reconnectů od startu |
+| `reconn_mqtt` | Počet MQTT reconnectů od startu |
+| `ver` | Verze firmware |
 
 Timestamp v hodnotovém topicu odpovídá **středoevropskému času** (CET/CEST) s automatickým přepínáním letního/zimního času (poslední neděle v březnu/říjnu).
 

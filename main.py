@@ -12,10 +12,11 @@ import ntptime
 import time
 import math
 import gc
+import json
 import usocket
 import config
 
-VERSION = "1.2.5"
+VERSION = "1.2.6"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -75,6 +76,10 @@ class SharedResources:
 
     def __init__(self):
         self.wdt = None
+        self._boot_ticks = time.ticks_ms()
+        self.reconn_wifi = 0
+        self.reconn_mqtt = 0
+        self._mqtt_ever_connected = False
         self.v_ref = GAIN_VREF.get(config.ADC_GAIN)
         t = time.gmtime()
         self.utc_offset = cet_offset(t)
@@ -175,6 +180,7 @@ class SharedResources:
         if self.wlan.isconnected():
             if self._wifi_connecting:
                 self._wifi_connecting = False
+                self.reconn_wifi += 1
                 self._mqtt_backoff = 1000
                 self._mqtt_next_try = 0
                 self._sync_ntp()
@@ -295,6 +301,9 @@ class SharedResources:
             client.sock.settimeout(2)  # přístup k internímu atributu umqtt.simple — umqtt nenabízí veřejné API pro nastavení socket timeoutu
             client.publish(config.MQTT_STATUS_TOPIC, "online", retain=True)
             self.mqtt = client
+            if self._mqtt_ever_connected:
+                self.reconn_mqtt += 1
+            self._mqtt_ever_connected = True
             self._mqtt_backoff = 1000
             self._mqtt_last_ping = time.ticks_ms()
             return True
@@ -565,6 +574,7 @@ class SensorManager:
             self._display_sensor = 0
 
         self._conn_error = None  # ERR_WIFI nebo ERR_MQTT
+        self._diag_counter = 0
 
         # LED piny (paralelní list k self.sensors)
         self._leds = []
@@ -602,6 +612,25 @@ class SensorManager:
             if not s.publish():
                 all_ok = False
         return all_ok
+
+    def _publish_diag(self):
+        """Publikování diagnostických informací jako JSON"""
+        now = time.ticks_ms()
+        uptime = time.ticks_diff(now, self.shared._boot_ticks) // 1000
+        diag = {
+            "uptime": uptime,
+            "mem": gc.mem_free(),
+            "buf": len(self.shared._pub_buffer),
+            "reconn_wifi": self.shared.reconn_wifi,
+            "reconn_mqtt": self.shared.reconn_mqtt,
+            "ver": VERSION,
+        }
+        if self.shared.wlan.isconnected():
+            try:
+                diag["rssi"] = self.shared.wlan.status('rssi')
+            except Exception:
+                pass
+        self.shared.publish(config.DIAG_TOPIC, json.dumps(diag), retain=True)
 
     def _update_display(self):
         """Zobrazení vybraného senzoru, střídá s chybou připojení"""
@@ -659,6 +688,12 @@ class SensorManager:
                 self.shared.flush_buffer()
 
             publish_ok = self._publish_all()
+
+            if wifi_ok and config.DIAG_INTERVAL > 0:
+                self._diag_counter += 1
+                if self._diag_counter >= config.DIAG_INTERVAL:
+                    self._diag_counter = 0
+                    self._publish_diag()
 
             if wifi_ok:
                 if not publish_ok:
