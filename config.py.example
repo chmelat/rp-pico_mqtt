@@ -38,7 +38,7 @@ PUBLISH_BUFFER_MAX = 200
 
 # Diagnostika (0 = vypnuto)
 DIAG_INTERVAL = 60                     # publikovat každých N cyklů
-DIAG_TOPIC = "sensor/L200h/diag"       # MQTT topic pro diagnostiku
+DIAG_TOPIC = "diag/L200h"              # MQTT topic pro diagnostiku
 
 # Seznam senzorů s per-senzor konfigurací
 SENSORS = [

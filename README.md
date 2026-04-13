@@ -294,7 +294,7 @@ Při inicializaci se provede I2C scan a ověří se přítomnost zařízení na 
 | `WDT_TIMEOUT_MS` | `8000` | Timeout watchdogu v ms |
 | `PUBLISH_BUFFER_MAX` | `200` | Max. počet hodnot v zásobníku pro případ výpadku WiFi/MQTT |
 | `DIAG_INTERVAL` | `60` | Publikovat diagnostiku každých N cyklů (0 = vypnuto) |
-| `DIAG_TOPIC` | `"sensor/L200h/diag"` | MQTT topic pro diagnostiku |
+| `DIAG_TOPIC` | `"diag/L200h"` | MQTT topic pro diagnostiku |
 
 ### Senzory (SENSORS)
 
