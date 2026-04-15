@@ -1,6 +1,6 @@
 # mqtt_to_postgres
 
-Verze: `1.0.6`
+Verze: `1.1.0`
 
 Daemon, který poslouchá MQTT broker a ukládá přijatá senzorová data do
 PostgreSQL. Běží na pozadí, sám se připojí k MQTT i k databázi a zapisuje
@@ -67,6 +67,8 @@ connection = dbname=zircodb user=sensor password=heslo host=10.0.0.8 port=5432
 broker = 10.0.0.26
 port   = 1883
 topic  = sensor/#
+username = sensor
+password = mojeheslo
 
 [sensor]
 strip_prefix = sensor/
@@ -74,6 +76,7 @@ strip_prefix = sensor/
 
 - **`connection`** — připojení k PostgreSQL (formát libpq).
 - **`topic`** — MQTT topic k odběru. `sensor/#` znamená "vše začínající na `sensor/`".
+- **`username`** / **`password`** — přihlašovací údaje k MQTT brokeru. Vynechte nebo zakomentujte pro anonymní přístup.
 - **`strip_prefix`** — co oříznout z topicu, aby vzniklo jméno senzoru v DB.
   Například: topic `sensor/L200h/pirani` → po oříznutí `sensor/` → v DB se hledá
   senzor s názvem `L200h/pirani`.
@@ -197,7 +200,7 @@ Definice funkcí jsou v souboru `sensor_value_functions.sql`.
 
 - **Fronta**: při výpadku DB delším než `10 000 × interval měření` se začnou
   zahazovat nejstarší data. Kapacita je nastavitelná v kódu (`QUEUE_MAX`).
-- **MQTT bez hesla**: broker se předpokládá bez autentizace. Pro přidání hesla
-  je nutné doplnit `client.username_pw_set()` v kódu a rozšířit konfiguraci.
+- **MQTT autentizace**: při špatných credentials (CONNACK rc 4/5) se daemon
+  ukončí s chybovou hláškou — neopakuje připojení, dokud se neopraví konfigurace.
 - **Nepřesný čas z payloadu**: pokud senzor posílá špatný timestamp, projeví se
   přímo v `create_tms` v DB.
