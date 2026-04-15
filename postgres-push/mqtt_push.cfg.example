@@ -2,11 +2,11 @@
 connection = dbname= user=sensor password= host=10.0.0.8 port=5432
 
 [mqtt]
-broker = 10.10.0.43
+broker = 10.0.0.26
 port   = 1883
 topic  = sensor/#
-# username =
-# password =
+username = mojejmeno
+password = mojeheslo
 
 [sensor]
 # Prefix stripped from MQTT topic to get sensor.name in DB
