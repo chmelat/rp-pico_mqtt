@@ -6,6 +6,7 @@ using the same INSERT...SELECT pattern as postgres_query.c.
 """
 
 import collections
+from datetime import datetime, timezone
 import configparser
 import logging
 import signal
@@ -23,14 +24,13 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 QUEUE_MAX = 10_000
 #INSERT_SQL = (
 #    "INSERT INTO sensor_value (sensor_id, value, create_tms) "
 #    "SELECT id, %s, %s FROM sensor WHERE name = %s"
 #)
 INSERT_SQL = "SELECT insert_sensor_value(%s, %s, %s)"
-INSERT_SQL_NO_TS = "SELECT insert_sensor_value(%s, %s)"
 
 def load_config(path):
     cfg = configparser.ConfigParser()
@@ -69,12 +69,7 @@ def db_worker(conn_string, insert_queue, stop_event):
 
             try:
                 with conn.cursor() as cur:
-                    batch_ts = [r for r in batch if len(r) == 3]
-                    batch_no_ts = [r for r in batch if len(r) == 2]
-                    if batch_ts:
-                        cur.executemany(INSERT_SQL, batch_ts)
-                    if batch_no_ts:
-                        cur.executemany(INSERT_SQL_NO_TS, batch_no_ts)
+                    cur.executemany(INSERT_SQL, batch)
                 conn.commit()
                 log.debug("Inserted %d rows", len(batch))
             except (psycopg2.errors.RaiseException, psycopg2.IntegrityError) as e:
@@ -85,8 +80,7 @@ def db_worker(conn_string, insert_queue, stop_event):
                 for row in batch:
                     try:
                         with conn.cursor() as cur:
-                            sql = INSERT_SQL if len(row) == 3 else INSERT_SQL_NO_TS
-                            cur.execute(sql, row)
+                            cur.execute(INSERT_SQL, row)
                         conn.commit()
                         saved += 1
                     except (psycopg2.errors.RaiseException, psycopg2.IntegrityError) as e2:
@@ -143,10 +137,9 @@ def main():
         except (ValueError, TypeError, IndexError):
             return
         sensor_name = t.removeprefix(strip_prefix)
-        if ts:
-            insert_queue.append((sensor_name, value, ts))
-        else:
-            insert_queue.append((sensor_name, value))
+        if not ts:
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        insert_queue.append((sensor_name, value, ts))
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
         if reason_code == 0:
