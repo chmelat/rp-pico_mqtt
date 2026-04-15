@@ -8,6 +8,8 @@ MQTT_PORT = 1883
 MQTT_CLIENT_ID = "pico_L200h"
 MQTT_KEEPALIVE = 60          # [s] keepalive interval pro broker
 MQTT_STATUS_TOPIC = "sensor/L200h/status"  # LWT a online status
+MQTT_USER = None             # MQTT username (None = anonymní přístup)
+MQTT_PASSWORD = None         # MQTT heslo
 
 # I2C piny
 I2C_ID = 1              # 0 = I2C0, 1 = I2C1

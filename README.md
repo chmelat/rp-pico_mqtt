@@ -224,6 +224,8 @@ Veškeré parametry jsou v souboru `config.py`.
 | `MQTT_CLIENT_ID` | `"pico_L200h"` | Identifikátor klienta |
 | `MQTT_KEEPALIVE` | `60` | Keepalive interval v sekundách |
 | `MQTT_STATUS_TOPIC` | `"sensor/L200h/status"` | Topic pro LWT a stav zařízení (online/offline) |
+| `MQTT_USER` | `None` | MQTT username (`None` = anonymní přístup) |
+| `MQTT_PASSWORD` | `None` | MQTT heslo |
 
 ### Piny
 
@@ -415,6 +417,37 @@ Stav senzoru (`status_topic`) je vždy přítomen a nabývá hodnot:
 
 Navíc se na `MQTT_STATUS_TOPIC` (LWT, `retain=True`) publikuje stav zařízení: `"online"` při startu, `"offline"` při neočekávaném odpojení.
 
+### Autentizace
+
+MQTT broker by měl být nakonfigurován s autentizací (username/password). Anonymní přístup se nedoporučuje pro produkční nasazení.
+
+**Nastavení brokeru (Mosquitto):**
+
+1. Vytvořte soubor s uživateli a hesly:
+   ```bash
+   # Vytvoření nového souboru s prvním uživatelem
+   mosquitto_passwd -c /etc/mosquitto/passwd sensor
+   # Přidání dalšího uživatele (bez -c, aby se soubor nepřepsal)
+   mosquitto_passwd /etc/mosquitto/passwd dalsi_uzivatel
+   ```
+
+2. V `/etc/mosquitto/mosquitto.conf` nastavte:
+   ```
+   allow_anonymous false
+   password_file /etc/mosquitto/passwd
+   ```
+
+3. Restartujte broker:
+   ```bash
+   systemctl restart mosquitto
+   ```
+
+**Nastavení klientů:**
+
+- **Pico (config.py):** nastavte `MQTT_USER` a `MQTT_PASSWORD`
+- **mqtt_to_postgres (mqtt_push.cfg):** odkomentujte `username` a `password` v sekci `[mqtt]`
+- **Shell skripty (mqtt_show.sh):** obsahují flagy `-u` a `-P` — upravte credentials
+
 ### Diagnostika
 
 Každých `DIAG_INTERVAL` měřicích cyklů se na `DIAG_TOPIC` publikuje JSON s diagnostikou zařízení (`retain=True`):
@@ -446,6 +479,7 @@ Timestamp v hodnotovém topicu odpovídá **středoevropskému času** (CET/CEST
 | `E--3` | Chyba ADC (I2C komunikace) | Ano | Ano (`adc_error`) |
 | `E--4` | Neplatná konfigurace (ADC_GAIN, v_range=0) | Ano | Ano (`config_error`) |
 | `E--5` | Fatální výjimka — zařízení čeká na WDT reset | Ano | Ne |
+| `E--6` | MQTT autentizace selhala (špatné jméno/heslo) | Ano | Ne |
 
 ## Chování při chybách
 

@@ -16,7 +16,7 @@ import json
 import usocket
 import config
 
-VERSION = "1.2.6"
+VERSION = "1.3.0"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -35,6 +35,7 @@ ERR_HI = "E-Hi"
 ERR_ADC = "E--3"
 ERR_CFG = "E--4"
 ERR_FATAL = "E--5"
+ERR_AUTH = "E--6"
 
 # Srozumitelné zprávy pro MQTT
 ERR_MQTT_MSG = {
@@ -116,6 +117,7 @@ class SharedResources:
         self._mqtt_next_try = 0
         self._mqtt_backoff = 1000
         self._mqtt_last_ping = 0
+        self._mqtt_auth_err = False
         self._wifi_connecting = False
         self._wifi_deadline = 0
         self._pub_buffer = []  # zásobník: [(topic, payload, retain), ...]
@@ -257,6 +259,8 @@ class SharedResources:
         """Připojení k MQTT brokeru s exponenciálním backoffem"""
         if self.mqtt is not None:
             return True
+        if self._mqtt_auth_err:
+            return False
         if not self.wlan.isconnected():
             return False
 
@@ -290,9 +294,13 @@ class SharedResources:
 
         client = None
         try:
+            mqtt_user = getattr(config, 'MQTT_USER', None)
+            mqtt_pass = getattr(config, 'MQTT_PASSWORD', None) or ""
             client = MQTTClient(config.MQTT_CLIENT_ID,
                                 config.MQTT_BROKER,
                                 config.MQTT_PORT,
+                                user=mqtt_user,
+                                password=mqtt_pass if mqtt_user else None,
                                 keepalive=config.MQTT_KEEPALIVE)
             client.set_last_will(config.MQTT_STATUS_TOPIC,
                                  "offline", retain=True)
@@ -309,12 +317,17 @@ class SharedResources:
         except BaseException as e:
             if isinstance(e, (MemoryError, KeyboardInterrupt, SystemExit)):
                 raise
-            print("MQTT error:", e)
             if client is not None:
                 try:
                     client.disconnect()
                 except BaseException:
                     pass
+            # CONNACK rc 4 = bad credentials, 5 = not authorized
+            if isinstance(e, MQTTException) and e.args and e.args[0] in (4, 5):
+                print("MQTT auth failed:", e)
+                self._mqtt_auth_err = True
+                return False
+            print("MQTT error:", e)
             self._mqtt_next_try = time.ticks_add(now, self._mqtt_backoff)
             self._mqtt_backoff = min(self._mqtt_backoff * 2, 60_000)
             return False
@@ -663,7 +676,7 @@ class SensorManager:
         self.shared.wdt = WDT(timeout=config.WDT_TIMEOUT_MS)
 
         if not self.shared.connect_mqtt():
-            self.shared.show_error(ERR_MQTT)
+            self.shared.show_error(ERR_AUTH if self.shared._mqtt_auth_err else ERR_MQTT)
             self.shared.safe_sleep_ms(2000)
 
         while True:
@@ -696,7 +709,9 @@ class SensorManager:
                     self._publish_diag()
 
             if wifi_ok:
-                if not publish_ok:
+                if self.shared._mqtt_auth_err:
+                    self._conn_error = ERR_AUTH
+                elif not publish_ok:
                     self._conn_error = ERR_MQTT
                 else:
                     self._conn_error = None

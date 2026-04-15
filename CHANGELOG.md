@@ -2,12 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## mqtt_to_postgres.py 1.1.0
+
+### Added
+- MQTT authentication: reads optional `username` and `password` from `[mqtt]` section
+  in config file. If set, calls `username_pw_set()` before connecting.
+
 ## mqtt_to_postgres.py 1.0.3
 
 ### Fixed
 - Permanent DB errors (duplicate key, sensor not found) now discard the failed batch instead
   of re-queuing it. Previously, a single bad item caused an infinite retry loop requiring a
   manual daemon restart.
+
+## main.py 1.3.0
+
+### Added
+- MQTT authentication: `MQTTClient` now accepts `MQTT_USER` and `MQTT_PASSWORD` from config
+  (`None` = anonymous access preserved for backward compatibility).
+- New error code `E--6` on display when MQTT broker rejects credentials (CONNACK rc 4/5).
+  Retry is stopped until device restart — bad credentials won't fix themselves.
 
 ## main.py 1.2.6
 

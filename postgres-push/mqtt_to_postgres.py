@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-VERSION = "1.0.7"
+VERSION = "1.1.0"
 QUEUE_MAX = 10_000
 #INSERT_SQL = (
 #    "INSERT INTO sensor_value (sensor_id, value, create_tms) "
@@ -125,6 +125,8 @@ def main():
     broker = cfg["mqtt"]["broker"]
     port = cfg["mqtt"].getint("port", 1883)
     topic = cfg["mqtt"]["topic"]
+    mqtt_user = cfg["mqtt"].get("username", fallback=None)
+    mqtt_pass = cfg["mqtt"].get("password", fallback=None)
     strip_prefix = cfg["sensor"].get("strip_prefix", "sensor/")
 
     insert_queue = collections.deque(maxlen=QUEUE_MAX)
@@ -150,6 +152,9 @@ def main():
         if reason_code == 0:
             log.info("MQTT connected, subscribing to %s", topic)
             client.subscribe(topic)
+        elif int(reason_code) in (4, 5):
+            log.error("MQTT auth failed (rc=%s) — check username/password in config", reason_code)
+            client.disconnect()
         else:
             log.warning("MQTT connect failed, rc=%s", reason_code)
 
@@ -164,6 +169,8 @@ def main():
     worker.start()
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2) if _PAHO_V2 else mqtt.Client()
+    if mqtt_user:
+        client.username_pw_set(mqtt_user, mqtt_pass)
     client.on_connect = on_connect
     client.on_message = on_message
     client.on_disconnect = on_disconnect
