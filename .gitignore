@@ -6,4 +6,7 @@
 pirani-kalibrace/
 config.py
 postgres-push/mqtt_push.cfg
+mqtt_show.sh
+mqtt_show_server.sh
+mqtt_test_server.sh
 *.swp
