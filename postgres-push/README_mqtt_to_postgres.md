@@ -1,6 +1,6 @@
 # mqtt_to_postgres
 
-Verze: `1.1.0`
+Verze: `1.1.2`
 
 Daemon, který poslouchá MQTT broker a ukládá přijatá senzorová data do
 PostgreSQL. Běží na pozadí, sám se připojí k MQTT i k databázi a zapisuje
@@ -20,7 +20,8 @@ Daemon zpracovává zprávy ve tvaru:
 hodnota [timestamp]
 ```
 
-Timestamp je volitelný. Pokud chybí, použije se aktuální čas serveru.
+Timestamp je volitelný. Pokud chybí, použije se aktuální čas serveru (UTC)
+v okamžiku přijetí MQTT zprávy, s přesností na mikrosekundy.
 
 Příklady:
 

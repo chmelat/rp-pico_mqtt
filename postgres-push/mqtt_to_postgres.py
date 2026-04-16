@@ -24,7 +24,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 QUEUE_MAX = 10_000
 #INSERT_SQL = (
 #    "INSERT INTO sensor_value (sensor_id, value, create_tms) "
@@ -138,7 +138,7 @@ def main():
             return
         sensor_name = t.removeprefix(strip_prefix)
         if not ts:
-            ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            ts = datetime.now(timezone.utc).isoformat()
         insert_queue.append((sensor_name, value, ts))
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
