@@ -16,8 +16,8 @@
 | A2 | ~~VYSOKÁ~~ | WDT starvation v `_publish_all()` — 0 feedů mezi N publish × 2s timeout | **OPRAVENO** (v1.3.1) |
 | A3 | VYSOKÁ | `MQTTClient.connect()` bez timeoutu — responsivní TCP + mrtvý broker blokuje do WDT resetu | Otevřeno |
 | A4 | STŘEDNÍ | `getaddrinfo()` bez uživatelského timeoutu — DNS blok až ~5s | Otevřeno |
-| A5 | STŘEDNÍ | Timezone mismatch Pico (local bez tz) vs. Postgres daemon (UTC s tz) | Otevřeno |
-| A6 | NÍZKÁ | `_offset_day` inicializován z pre-NTP RTC v `__init__` | Otevřeno |
+| A5 | ~~STŘEDNÍ~~ | Timezone mismatch Pico (local bez tz) vs. Postgres daemon (UTC s tz) | **OPRAVENO** (v1.4.0) |
+| A6 | ~~NÍZKÁ~~ | `_offset_day` inicializován z pre-NTP RTC v `__init__` | **OPRAVENO** (v1.4.0) |
 | D1 | DESIGN | `_mqtt_auth_err` zaseknutý natrvalo — reset jen rebootem | Otevřeno |
 | D2 | DESIGN | Per-sensor `{topic}/status` s `retain=False` — nečitelné pro pozdější subscribery | Otevřeno |
 | D3 | DESIGN | `_uptime_s` drift — přičítá nominální `INTERVAL_S`, ne skutečný elapsed | Otevřeno |
@@ -116,7 +116,7 @@ Alternativně používat přímo IP v configu.
 
 ---
 
-### A5 — Timezone mismatch Pico ↔ Postgres (STŘEDNÍ)
+### A5 — Timezone mismatch Pico ↔ Postgres (STŘEDNÍ) — OPRAVENO ve v1.4.0
 
 **Soubor:** `main.py:449–451`, `postgres-push/mqtt_to_postgres.py:132`
 
@@ -147,7 +147,7 @@ Nutno ověřit typ sloupce `sensor_value.create_tms` v DB a session TZ daemonu.
 
 ---
 
-### A6 — `_offset_day` inicializován z pre-NTP RTC (NÍZKÁ)
+### A6 — `_offset_day` inicializován z pre-NTP RTC (NÍZKÁ) — OPRAVENO ve v1.4.0
 
 **Soubor:** `main.py:84–86`
 

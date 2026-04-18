@@ -402,7 +402,7 @@ Každý senzor publikuje na **dvě témata**:
 
 | Topic | Obsah | retain | Kdy |
 |-------|-------|--------|-----|
-| `topic` | Hodnota + timestamp CET/CEST, např. `"23.456 2024-01-15T14:30:00"` | True | Pouze při platné hodnotě |
+| `topic` | Hodnota + timestamp UTC (ISO 8601 s `Z`), např. `"23.456 2026-04-18T12:00:00Z"` | True | Pouze při platné hodnotě |
 | `status_topic` | Stav senzoru | False | Vždy |
 
 Stav senzoru (`status_topic`) je vždy přítomen a nabývá hodnot:
@@ -453,7 +453,7 @@ MQTT broker by měl být nakonfigurován s autentizací (username/password). Ano
 Každých `DIAG_INTERVAL` měřicích cyklů se na `DIAG_TOPIC` publikuje JSON s diagnostikou zařízení (`retain=True`):
 
 ```json
-{"uptime":3600,"rssi":-55,"mem":45000,"buf":3,"reconn_wifi":1,"reconn_mqtt":2,"ver":"1.2.6"}
+{"uptime":3600,"rssi":-55,"mem":45000,"buf":3,"reconn_wifi":1,"reconn_mqtt":2,"ver":"1.4.0"}
 ```
 
 | Klíč | Popis |
@@ -466,7 +466,7 @@ Každých `DIAG_INTERVAL` měřicích cyklů se na `DIAG_TOPIC` publikuje JSON s
 | `reconn_mqtt` | Počet MQTT reconnectů od startu |
 | `ver` | Verze firmware |
 
-Timestamp v hodnotovém topicu odpovídá **středoevropskému času** (CET/CEST) s automatickým přepínáním letního/zimního času (poslední neděle v březnu/říjnu).
+Timestamp v hodnotovém topicu je v **UTC** s příponou `Z` (ISO 8601, např. `2026-04-18T12:00:00Z`). Postgres/Grafana zobrazuje čas v lokální zóně podle session TZ — žádná DST logika na Picu není potřeba.
 
 ## Chybové kódy
 

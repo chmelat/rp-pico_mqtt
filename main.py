@@ -16,7 +16,7 @@ import json
 import usocket
 import config
 
-VERSION = "1.3.1"
+VERSION = "1.4.0"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -46,32 +46,6 @@ ERR_MQTT_MSG = {
 }
 
 
-def _last_sunday(year, month):
-    """Vrátí den v měsíci poslední neděle daného měsíce."""
-    days_in_month = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    if month == 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
-        last = 29
-    else:
-        last = days_in_month[month]
-    t = time.gmtime(time.mktime((year, month, last, 0, 0, 0, 0, 0)))
-    # weekday: 0=Po, 6=Ne
-    return last - (t[6] + 1) % 7
-
-
-def cet_offset(t):
-    """Vrátí UTC offset v sekundách: 7200 (CEST, léto) nebo 3600 (CET, zima)."""
-    year, month, day, hour = t[0], t[1], t[2], t[3]
-    if month < 3 or month > 10:
-        return 3600
-    if 3 < month < 10:
-        return 7200
-    ls = _last_sunday(year, month)
-    if month == 3:
-        return 7200 if (day > ls or (day == ls and hour >= 1)) else 3600
-    else:  # říjen
-        return 3600 if (day > ls or (day == ls and hour >= 1)) else 7200
-
-
 class SharedResources:
     """Sdílené zdroje pro všechny senzory"""
 
@@ -81,9 +55,7 @@ class SharedResources:
         self.reconn_mqtt = 0
         self._mqtt_ever_connected = False
         self.v_ref = GAIN_VREF.get(config.ADC_GAIN)
-        t = time.gmtime()
-        self.utc_offset = cet_offset(t)
-        self._offset_day = t[2]
+        self._last_ntp_day = time.gmtime()[2]
 
         # Display jako první - pro zobrazení chyb při inicializaci
         try:
@@ -152,13 +124,12 @@ class SharedResources:
             return False
 
     def _sync_ntp(self):
-        """Synchronizace RTC přes NTP, přepočítá utc_offset. Vrátí True při úspěchu."""
+        """Synchronizace RTC přes NTP. Vrátí True při úspěchu."""
         try:
             ntptime.timeout = 5
             ntptime.settime()
             t = time.gmtime()
-            self.utc_offset = cet_offset(t)
-            self._offset_day = t[2]
+            self._last_ntp_day = t[2]
             print("NTP OK:", t[:6])
             return True
         except Exception as e:
@@ -448,8 +419,8 @@ class SensorChannel:
 
         # Hodnotu publikuj jen když je platná
         if self.last_value is not None:
-            t = time.gmtime(time.time() + self.shared.utc_offset)
-            ts = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(
+            t = time.gmtime()
+            ts = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}Z".format(
                 t[0], t[1], t[2], t[3], t[4], t[5])
             formatted = "{:.{}f} {}".format(self.last_value, self.precision, ts)
             if not self.shared.publish(self.topic, formatted, retain=True):
@@ -687,10 +658,11 @@ class SensorManager:
             loop_start = time.ticks_ms()
 
             t = time.gmtime()
-            if t[3] >= 1 and t[2] != self.shared._offset_day:
-                if not self.shared.wlan.isconnected() or not self.shared._sync_ntp():
-                    self.shared.utc_offset = cet_offset(t)
-                    self.shared._offset_day = t[2]
+            if t[3] >= 1 and t[2] != self.shared._last_ntp_day:
+                if self.shared.wlan.isconnected():
+                    self.shared._sync_ntp()
+                else:
+                    self.shared._last_ntp_day = t[2]
 
             wifi_ok = self.shared.check_wifi()
             if not wifi_ok:

@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## main.py 1.4.0
+
+### Changed
+- MQTT publish timestamps are now UTC with `Z` suffix (e.g. `2026-04-18T12:00:00Z`)
+  instead of naked local time (CET/CEST without TZ marker). Postgres interprets the
+  explicit UTC correctly regardless of session TZ, eliminating a lurking silent-shift
+  bug if the DB session TZ ever changed. Grafana/psql display via session TZ
+  continues to show local time — no visible change in dashboards or queries.
+- Matches the fallback format already used by `mqtt_to_postgres.py` when MQTT payload
+  contains no timestamp — a single consistent shape in the `create_tms` column.
+
+### Removed
+- DST infrastructure: `_last_sunday()` function, `cet_offset()` function,
+  `SharedResources.utc_offset` attribute, and the DST portion of the daily resync
+  in `run()`. No longer needed — `time.gmtime()` for UTC publish does not depend on
+  local zone.
+
+### Kept
+- Daily NTP RTC resync triggered after 01:00 UTC on a new day — unchanged behavior,
+  only the DST offset recomputation has been removed. `SharedResources._offset_day`
+  renamed to `_last_ntp_day` to reflect its remaining role (tracking last resync).
+
 ## main.py 1.3.1
 
 ### Fixed
