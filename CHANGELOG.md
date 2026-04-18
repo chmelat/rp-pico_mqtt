@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## main.py 1.3.1
+
+### Fixed
+- WDT starvation in `SharedResources.publish()` — now feeds the watchdog before each
+  publish attempt. Previously, a chain of 2 publishes per sensor × N sensors × 2s socket
+  timeout could exceed `WDT_TIMEOUT_MS` on slow or unresponsive networks (audit #6, A2).
+- WDT starvation in `SharedResources.flush_buffer()` — feed now runs every iteration
+  instead of every 10th. Long backlog flushes over a slow link no longer risk reset
+  (audit #6, A1; previously tracked as N3/R1 in audits #4 and #5).
+
+## mqtt_to_postgres.py 1.2.1
+
+### Added
+- `psycopg2.extras.execute_batch` replaces `cursor.executemany` for batch inserts —
+  significantly fewer round-trips to the DB per batch.
+- Event-driven DB worker: `threading.Condition` replaces the 0.5s polling loop.
+  `on_message` notifies on queue append; worker sleeps until data arrives. Lower CPU
+  at idle and lower insert latency.
+
+### Fixed
+- Preserved auth-failure handling (CONNACK rc 4/5) from v1.1.x after the Condition
+  rewrite — daemon disconnects instead of looping on bad credentials.
+- Preserved `on_disconnect` logging — unexpected broker disconnects are logged again.
+- Preserved shutdown queue-drain warning — logs count of unflushed items when stopping
+  with non-empty queue.
+- Restored saved/discarded summary in row-by-row retry path — single INFO line at the
+  end instead of per-row ERROR spam; inner except narrowed to
+  `(RaiseException, IntegrityError)` so unknown errors propagate to reconnect.
+- Removed `try/except` around `client.loop_forever()` — paho handles network retries
+  internally; the wrapper masked legitimate errors and duplicated the SIGTERM handler.
+
 ## mqtt_to_postgres.py 1.1.0
 
 ### Added

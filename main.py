@@ -16,7 +16,7 @@ import json
 import usocket
 import config
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -350,6 +350,8 @@ class SharedResources:
 
     def publish(self, topic, payload, retain=True):
         """Odeslání payload na MQTT topic"""
+        if self.wdt:
+            self.wdt.feed()
         if not self.connect_mqtt():
             return False
         try:
@@ -365,7 +367,7 @@ class SharedResources:
             return
         sent = 0
         while self._pub_buffer:
-            if self.wdt and sent % 10 == 0:
+            if self.wdt:
                 self.wdt.feed()
             topic, payload, retain = self._pub_buffer[0]
             try:
