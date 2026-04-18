@@ -6,15 +6,16 @@ using the same INSERT...SELECT pattern as postgres_query.c.
 """
 
 import collections
-from datetime import datetime, timezone
 import configparser
 import logging
 import signal
 import sys
 import threading
+from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 import psycopg2
+import psycopg2.extras
 
 _PAHO_V2 = hasattr(mqtt, "CallbackAPIVersion")
 
@@ -24,13 +25,12 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-VERSION = "1.1.2"
+VERSION = "1.2.1"
 QUEUE_MAX = 10_000
-#INSERT_SQL = (
-#    "INSERT INTO sensor_value (sensor_id, value, create_tms) "
-#    "SELECT id, %s, %s FROM sensor WHERE name = %s"
-#)
+BATCH_SIZE = 500
 INSERT_SQL = "SELECT insert_sensor_value(%s, %s, %s)"
+
+queue_cond = threading.Condition()
 
 def load_config(path):
     cfg = configparser.ConfigParser()
@@ -39,13 +39,11 @@ def load_config(path):
         sys.exit(1)
     return cfg
 
-
 def db_worker(conn_string, insert_queue, stop_event):
     conn = None
     backoff = 1
 
     while not stop_event.is_set() or insert_queue:
-        # Connect / reconnect
         if conn is None:
             try:
                 conn = psycopg2.connect(conn_string)
@@ -58,54 +56,52 @@ def db_worker(conn_string, insert_queue, stop_event):
                 backoff = min(backoff * 2, 60)
                 continue
 
-        # Flush queue in batches
-        if insert_queue:
-            batch = []
-            try:
-                while insert_queue and len(batch) < 500:
-                    batch.append(insert_queue.popleft())
-            except IndexError:
-                pass
+        batch = []
+        with queue_cond:
+            while not insert_queue and not stop_event.is_set():
+                queue_cond.wait(timeout=1.0)
+            while insert_queue and len(batch) < BATCH_SIZE:
+                batch.append(insert_queue.popleft())
 
-            try:
-                with conn.cursor() as cur:
-                    cur.executemany(INSERT_SQL, batch)
-                conn.commit()
-                log.debug("Inserted %d rows", len(batch))
-            except (psycopg2.errors.RaiseException, psycopg2.IntegrityError) as e:
-                conn.rollback()
-                log.warning("Batch failed (%s), retrying %d rows individually", e, len(batch))
-                saved = 0
-                discarded = 0
-                for row in batch:
-                    try:
-                        with conn.cursor() as cur:
-                            cur.execute(INSERT_SQL, row)
-                        conn.commit()
-                        saved += 1
-                    except (psycopg2.errors.RaiseException, psycopg2.IntegrityError) as e2:
-                        conn.rollback()
-                        discarded += 1
-                        log.debug("Discarding row %s: %s", row[0], e2)
-                log.info("Row-by-row: saved %d, discarded %d", saved, discarded)
-            except Exception as e:
-                log.error("DB insert failed: %s", e)
-                # Return items to queue (prepend to preserve order)
-                insert_queue.extendleft(reversed(batch))
+        if not batch:
+            continue
+
+        try:
+            with conn.cursor() as cur:
+                psycopg2.extras.execute_batch(cur, INSERT_SQL, batch)
+            conn.commit()
+            log.debug("Inserted %d rows", len(batch))
+        except (psycopg2.errors.RaiseException, psycopg2.IntegrityError) as e:
+            conn.rollback()
+            log.warning("Batch failed (%s), retrying %d rows individually", e, len(batch))
+            saved = 0
+            discarded = 0
+            for row in batch:
                 try:
-                    conn.close()
-                except Exception:
-                    pass
-                conn = None
-                stop_event.wait(backoff)
-                backoff = min(backoff * 2, 60)
-        else:
-            stop_event.wait(0.5)
+                    with conn.cursor() as cur:
+                        cur.execute(INSERT_SQL, row)
+                    conn.commit()
+                    saved += 1
+                except (psycopg2.errors.RaiseException, psycopg2.IntegrityError) as e2:
+                    conn.rollback()
+                    discarded += 1
+                    log.debug("Discarding row %s: %s", row[0], e2)
+            log.info("Row-by-row: saved %d, discarded %d", saved, discarded)
+        except Exception as e:
+            log.error("DB fatal error: %s", e)
+            with queue_cond:
+                insert_queue.extendleft(reversed(batch))
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
+            stop_event.wait(backoff)
+            backoff = min(backoff * 2, 60)
 
     if conn:
         conn.close()
         log.info("DB connection closed")
-
 
 def main():
     cfg_path = "mqtt_push.cfg"
@@ -113,8 +109,8 @@ def main():
         cfg_path = sys.argv[1]
 
     log.info("Starting mqtt_to_postgres v%s", VERSION)
-
     cfg = load_config(cfg_path)
+    
     conn_string = cfg["postgres"]["connection"]
     broker = cfg["mqtt"]["broker"]
     port = cfg["mqtt"].getint("port", 1883)
@@ -127,19 +123,19 @@ def main():
     stop_event = threading.Event()
 
     def on_message(client, userdata, msg):
-        t = msg.topic
-        if t.endswith("/status"):
+        if msg.topic.endswith("/status"):
             return
         try:
-            parts = msg.payload.decode().split()
+            payload = msg.payload.decode('utf-8')
+            parts = payload.split()
             value = float(parts[0])
-            ts = " ".join(parts[1:]) or None
-        except (ValueError, TypeError, IndexError):
-            return
-        sensor_name = t.removeprefix(strip_prefix)
-        if not ts:
-            ts = datetime.now(timezone.utc).isoformat()
-        insert_queue.append((sensor_name, value, ts))
+            ts = " ".join(parts[1:]) or datetime.now(timezone.utc).isoformat()
+            sensor_name = msg.topic.removeprefix(strip_prefix)
+            with queue_cond:
+                insert_queue.append((sensor_name, value, ts))
+                queue_cond.notify()
+        except (UnicodeDecodeError, ValueError, IndexError) as e:
+            log.debug("Malformed message on %s: %s", msg.topic, e)
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
         if reason_code == 0:
@@ -156,22 +152,26 @@ def main():
         if rc != 0:
             log.warning("MQTT unexpected disconnect rc=%s", rc)
 
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2) if _PAHO_V2 else mqtt.Client()
+    if mqtt_user:
+        client.username_pw_set(mqtt_user, mqtt_pass)
+    
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.on_disconnect = on_disconnect
+
     worker = threading.Thread(
         target=db_worker, args=(conn_string, insert_queue, stop_event), daemon=True
     )
     worker.start()
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2) if _PAHO_V2 else mqtt.Client()
-    if mqtt_user:
-        client.username_pw_set(mqtt_user, mqtt_pass)
-    client.on_connect = on_connect
-    client.on_message = on_message
-    client.on_disconnect = on_disconnect
     def shutdown(signum, frame):
         log.info("Shutting down...")
         client.disconnect()
         client.loop_stop()
         stop_event.set()
+        with queue_cond:
+            queue_cond.notify_all()
         worker.join(timeout=10)
         remaining = len(insert_queue)
         if remaining:
@@ -182,9 +182,7 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
 
     client.connect(broker, port, keepalive=60)
-
     client.loop_forever()
-
 
 if __name__ == "__main__":
     main()
