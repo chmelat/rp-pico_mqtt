@@ -1,13 +1,13 @@
 # mqtt_to_postgres
 
-Verze: `1.1.2`
+Verze: `1.2.1`
 
 Daemon, který poslouchá MQTT broker a ukládá přijatá senzorová data do
 PostgreSQL. Běží na pozadí, sám se připojí k MQTT i k databázi a zapisuje
 hodnoty průběžně.
 
 ```
-  Senzor → MQTT broker → mqtt_to_postgres → PostgreSQL
+Senzor → MQTT broker → mqtt_to_postgres → PostgreSQL
 ```
 
 ---
@@ -27,16 +27,15 @@ Příklady:
 
 | MQTT topic | Payload | Co se stane |
 |---|---|---|
-| `sensor/L200h/pirani` | `0.152` | Uloží se s časem `now()` |
+| `sensor/L200h/pirani` | `0.152` | Uloží se s časem serveru |
 | `sensor/L200h/pirani` | `0.152 2026-03-19T14:23:01` | Uloží se s daným časem |
 | `sensor/L200h/pirani` | `0.152 2026-03-19 14:23:01` | Totéž (mezera místo `T`) |
-| `sensor/L200h/pirani` | `0.152 2026-03-19T14:23:01.274` | Timestamp se zlomky sekund |
+| `sensor/L200h/pirani` | `0.152 2026-03-19T14:23:01.274` | Uloží se se zlomky sekund |
 | `sensor/L200h/pirani/status` | `OK` | Ignorováno (topic končí `/status`) |
 | `sensor/L200h/status` | `online` | Ignorováno (topic končí `/status`) |
 
-Ignorují se:
-- Zprávy na topicích končících `/status` (stavové zprávy senzorů).
-- Zprávy, kde payload není číslo.
+Ignorují se zprávy na topicích končících `/status` a zprávy, kde payload
+není číslo.
 
 ---
 
@@ -75,12 +74,13 @@ password = mojeheslo
 strip_prefix = sensor/
 ```
 
-- **`connection`** — připojení k PostgreSQL (formát libpq).
+- **`connection`** — připojení k PostgreSQL ve formátu libpq.
 - **`topic`** — MQTT topic k odběru. `sensor/#` znamená "vše začínající na `sensor/`".
-- **`username`** / **`password`** — přihlašovací údaje k MQTT brokeru. Vynechte nebo zakomentujte pro anonymní přístup.
+- **`username`** / **`password`** — přihlašovací údaje k MQTT brokeru. Pro anonymní
+  přístup vynechte nebo zakomentujte.
 - **`strip_prefix`** — co oříznout z topicu, aby vzniklo jméno senzoru v DB.
-  Například: topic `sensor/L200h/pirani` → po oříznutí `sensor/` → v DB se hledá
-  senzor s názvem `L200h/pirani`.
+  Například topic `sensor/L200h/pirani` s prefixem `sensor/` vyhledá v DB
+  senzor se jménem `L200h/pirani`.
 
 ### 3. Spusť ručně (pro test)
 
@@ -88,7 +88,7 @@ strip_prefix = sensor/
 python mqtt_to_postgres.py mqtt_push.cfg
 ```
 
-Bez argumentu hledá `mqtt_push.cfg` v aktuálním adresáři. Ukončení: `Ctrl+C`.
+Bez argumentu hledá `mqtt_push.cfg` v aktuálním adresáři. Ukončení `Ctrl+C`.
 
 ### 4. Zkopíruj soubory pro systemd
 
@@ -110,14 +110,14 @@ sudo systemctl enable --now mqtt-to-postgres
 
 ```bash
 sudo systemctl status mqtt-to-postgres    # stav
-journalctl -u mqtt-to-postgres -f          # živé logy
+journalctl -u mqtt-to-postgres -f         # živé logy
 ```
 
 Další příkazy:
 
 ```bash
-sudo systemctl restart mqtt-to-postgres    # restart
-sudo systemctl stop mqtt-to-postgres       # zastavení
+sudo systemctl restart mqtt-to-postgres   # restart
+sudo systemctl stop mqtt-to-postgres      # zastavení
 ```
 
 > **Poznámka:** Service používá `DynamicUser=yes` — neběží pod rootem, systemd
@@ -141,18 +141,19 @@ MQTT broker
 MQTT vlákno  ──→  fronta (max 10 000 položek)  ──→  DB worker  ──→  PostgreSQL
 ```
 
-Oddělení přes frontu znamená, že výpadek databáze nezpůsobí ztrátu dat —
-zprávy se hromadí ve frontě, dokud se DB nevrátí. Teprve při naplnění
+Fronta izoluje MQTT stranu od DB strany: výpadek databáze nezpůsobí ztrátu
+dat, zprávy se hromadí ve frontě, dokud se DB nevrátí. Teprve při naplnění
 fronty (10 000 položek) se nejstarší data začnou zahazovat.
 
 ### Odolnost proti výpadkům
 
-- Při výpadku DB se worker pokouší znovu připojit s exponenciálním čekáním
+- **Výpadek DB** — worker se znovu připojuje s exponenciálním čekáním
   (1 s → 2 s → 4 s → … → max 60 s). Po úspěšném připojení se čekání resetuje.
-- Trvalé chyby (např. neexistující senzor v DB) způsobí zahození daného batche
-  — neopakují se donekonečna.
-- MQTT klient se při ztrátě spojení s brokerem připojí automaticky sám
-  (vlastnost knihovny paho-mqtt).
+- **Trvalé chyby** (např. neexistující senzor v DB) — pokud selže celý batch
+  na `RaiseException`/`IntegrityError`, worker přepne na zápis řádek po řádku:
+  uloží vše, co uložit lze, a zahodí jen konkrétní vadné řádky. Jedna špatná
+  položka tak nezničí celý batch.
+- **Ztráta MQTT spojení** — paho-mqtt se k brokeru připojí automaticky sám.
 
 ### Ukončení (graceful shutdown)
 
@@ -177,21 +178,21 @@ Formát: `YYYY-MM-DD HH:MM:SS LEVEL zpráva`. Příklady:
 
 ---
 
-## Příloha: Databázová funkce
+## Databázová funkce
 
 Daemon nic v DB nevytváří — předpokládá existující funkci `insert_sensor_value`,
-kterou volá ve dvou variantách:
+kterou volá vždy se třemi argumenty:
 
 ```sql
--- s timestampem
-SELECT insert_sensor_value('L200h/pirani', 0.152, '2026-03-19 14:23:01');
-
--- bez timestampu (použije now())
-SELECT insert_sensor_value('L200h/pirani', 0.152);
+SELECT insert_sensor_value('L200h/pirani', 0.152, '2026-03-19 14:23:01.274+00:00');
 ```
 
+Pokud v MQTT payloadu timestamp chybí, daemon ho doplní sám hodnotou
+`datetime.now(timezone.utc).isoformat()` (UTC, s mikrosekundami).
+
 Pro každý MQTT topic musí existovat odpovídající senzor v databázi (jméno =
-topic bez prefixu). Pokud senzor chybí, funkce vyhodí výjimku a batch se zahodí.
+topic bez prefixu). Pokud senzor chybí, funkce vyhodí výjimku a daný řádek
+se zahodí (viz výše — zbytek batche se uloží).
 
 Definice funkcí jsou v souboru `sensor_value_functions.sql`.
 
@@ -199,9 +200,12 @@ Definice funkcí jsou v souboru `sensor_value_functions.sql`.
 
 ## Omezení
 
-- **Fronta**: při výpadku DB delším než `10 000 × interval měření` se začnou
-  zahazovat nejstarší data. Kapacita je nastavitelná v kódu (`QUEUE_MAX`).
-- **MQTT autentizace**: při špatných credentials (CONNACK rc 4/5) se daemon
-  ukončí s chybovou hláškou — neopakuje připojení, dokud se neopraví konfigurace.
-- **Nepřesný čas z payloadu**: pokud senzor posílá špatný timestamp, projeví se
-  přímo v `create_tms` v DB.
+- **Velikost fronty** — při výpadku DB delším než `10 000 × interval měření`
+  se začnou zahazovat nejstarší data. Kapacita je nastavitelná v kódu
+  konstantou `QUEUE_MAX`.
+- **MQTT autentizace** — při špatných credentials (CONNACK rc 4/5) se daemon
+  ukončí s chybovou hláškou. Připojení nezkouší znovu, dokud se neopraví
+  konfigurace.
+- **Důvěra v payload** — daemon timestamp z payloadu nijak nevaliduje. Pokud
+  senzor posílá špatný čas, uloží se tak, jak je, do sloupce `create_tms`
+  v tabulce `sensor_value`.
