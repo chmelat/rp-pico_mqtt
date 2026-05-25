@@ -86,3 +86,4 @@ SensorChannel          # abstract base: read() → convert_raw() → publish()
 | `E--4` | Config error (bad gain / zero range) |
 | `E--5` | Fatal exception — waiting for WDT reset |
 | `E--6` | MQTT auth failed (bad credentials) |
+| `E-nc` | Sensor disconnected (current below `i_disconnect`, default 1 mA, `CurrentLoopSensor` only) |

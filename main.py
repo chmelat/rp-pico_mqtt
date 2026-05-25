@@ -16,7 +16,7 @@ import json
 import usocket
 import config
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -36,6 +36,7 @@ ERR_ADC = "E--3"
 ERR_CFG = "E--4"
 ERR_FATAL = "E--5"
 ERR_AUTH = "E--6"
+ERR_NC = "E-nc"
 
 # Srozumitelné zprávy pro MQTT
 ERR_MQTT_MSG = {
@@ -43,6 +44,7 @@ ERR_MQTT_MSG = {
     ERR_HI: "sensor_high",
     ERR_ADC: "adc_error",
     ERR_CFG: "config_error",
+    ERR_NC: "sensor_disconnected",
 }
 
 
@@ -441,14 +443,22 @@ class CurrentLoopSensor(SensorChannel):
         self.r_bocnik = cfg["r_bocnik"]
         self.i_min = cfg.get("i_min", 0.004)
         self.i_max = cfg.get("i_max", 0.020)
+        self.i_disconnect = cfg.get("i_disconnect", 0.001)
         self.p_min = cfg["p_min"]
         self.p_max = cfg["p_max"]
         self.v_min = self.i_min * self.r_bocnik
         self.v_max = self.i_max * self.r_bocnik
+        self.v_disconnect = (self.i_disconnect * self.r_bocnik
+                             if self.i_disconnect is not None else None)
 
     def convert_raw(self, raw):
         """Převod raw ADC hodnoty na tlak"""
         voltage = raw * self.shared.v_ref / 32767
+
+        # Odpojený senzor (proud pod prahem — typicky pod 1 mA v 4-20mA smyčce)
+        if self.v_disconnect is not None and voltage < self.v_disconnect:
+            return None, ERR_NC
+
         if voltage < 0:
             return None, ERR_LO
 

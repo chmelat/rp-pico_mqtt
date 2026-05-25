@@ -54,6 +54,7 @@ SENSORS = [
         "r_bocnik": 99.1,  # [Ohm]
         "i_min": 0.004,  # [A]
         "i_max": 0.020,  # [A]
+        "i_disconnect": 0.001,  # [A] pod = E-nc (odpojený senzor); None vypne kontrolu
         "p_min": 0,      # [kPa]
         "p_max": 120,    # [kPa]
         "precision": 3,  # počet desetinných míst pro MQTT
