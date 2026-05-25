@@ -319,6 +319,7 @@ Seznam senzorů se konfiguruje v poli `SENSORS`. Společné parametry:
 | `r_bocnik` | - | Odpor bočníku v Ohm |
 | `i_min` | `0.004` | Minimální proud (A) |
 | `i_max` | `0.020` | Maximální proud (A) |
+| `i_disconnect` | `0.001` | Proud (A), pod kterým se hlásí `E-nc` (odpojený senzor). `None` vypne kontrolu. |
 | `p_min` | - | Minimální výstupní hodnota |
 | `p_max` | - | Maximální výstupní hodnota |
 
@@ -350,6 +351,7 @@ SENSORS = [
         "r_bocnik": 99.1,     # [Ohm]
         "i_min": 0.004,       # [A]
         "i_max": 0.020,       # [A]
+        "i_disconnect": 0.001, # [A] pod = E-nc; None vypne
         "p_min": 0,           # [kPa]
         "p_max": 120,         # [kPa]
         "precision": 3,
@@ -412,6 +414,7 @@ Stav senzoru (`status_topic`) je vždy přítomen a nabývá hodnot:
 | `"OK"` | Platná hodnota |
 | `"sensor_low"` | Napětí/hodnota pod rozsahem (ERR_LO) |
 | `"sensor_high"` | Napětí/hodnota nad rozsahem (ERR_HI) |
+| `"sensor_disconnected"` | Proud pod prahem `i_disconnect` — odpojený/vadný senzor (ERR_NC, pouze `current_loop`) |
 | `"adc_error"` | Chyba ADC komunikace |
 | `"config_error"` | Neplatná konfigurace |
 
@@ -453,7 +456,7 @@ MQTT broker by měl být nakonfigurován s autentizací (username/password). Ano
 Každých `DIAG_INTERVAL` měřicích cyklů se na `DIAG_TOPIC` publikuje JSON s diagnostikou zařízení (`retain=True`):
 
 ```json
-{"uptime":3600,"rssi":-55,"mem":45000,"buf":3,"reconn_wifi":1,"reconn_mqtt":2,"ver":"1.4.0"}
+{"uptime":3600,"rssi":-55,"mem":45000,"buf":3,"reconn_wifi":1,"reconn_mqtt":2,"ver":"1.5.0"}
 ```
 
 | Klíč | Popis |
@@ -474,8 +477,9 @@ Timestamp v hodnotovém topicu je v **UTC** s příponou `Z` (ISO 8601, např. `
 |-----|--------|---------------------|-------------------|
 | `E--1` | Selhání WiFi připojení | Ano | Ne |
 | `E--2` | Selhání MQTT připojení | Ano | Ne |
-| `E-Lo` | Napětí/hodnota pod rozsahem (odpojený senzor) | Ano | Ano (`sensor_low`) |
+| `E-Lo` | Napětí/hodnota pod rozsahem (senzor funguje, hodnota pod min) | Ano | Ano (`sensor_low`) |
 | `E-Hi` | Napětí/hodnota nad rozsahem (zkrat/porucha) | Ano | Ano (`sensor_high`) |
+| `E-nc` | Odpojený senzor — proud pod `i_disconnect` (typ. <1 mA, pouze `current_loop`) | Ano | Ano (`sensor_disconnected`) |
 | `E--3` | Chyba ADC (I2C komunikace) | Ano | Ano (`adc_error`) |
 | `E--4` | Neplatná konfigurace (ADC_GAIN, v_range=0) | Ano | Ano (`config_error`) |
 | `E--5` | Fatální výjimka — zařízení čeká na WDT reset | Ano | Ne |

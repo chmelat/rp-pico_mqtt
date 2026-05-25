@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## main.py 1.5.0
+
+### Added
+- New error code `E-nc` (sensor disconnected) for `CurrentLoopSensor` — fires when
+  measured current is below `i_disconnect` (default 0.001 A = 1 mA). In a live
+  4-20 mA loop, current below ~1 mA is physically impossible (per NAMUR NE43 even
+  a faulting transmitter holds ≥3.5 mA), so this reliably indicates a broken wire,
+  unpowered sensor, or disconnected loop — distinct from `E-Lo` which now means
+  "sensor works but reads below the configured range."
+- New per-sensor config key `i_disconnect` (Amps). Set to `None` to disable the
+  check. Applies only to `current_loop`; `pirani` is voltage-based and behaves
+  differently on disconnect.
+- MQTT status string `sensor_disconnected` published on `{topic}/status` when
+  `E-nc` is active.
+
 ## main.py 1.4.0
 
 ### Changed
