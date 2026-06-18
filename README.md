@@ -268,6 +268,8 @@ Při inicializaci se provede I2C scan a ověří se přítomnost zařízení na 
 | 8 | ±0.512 V |
 | 16 | ±0.256 V |
 
+> ⚠️ **Pozor:** Spolehlivě fungují jen hodnoty `1` a `2`. Použitá knihovna `ads1x15` interpretuje `gain` jako index, zatímco `GAIN_VREF` v `main.py` jako násobitel — u `4`/`8`/`16` se rozcházejí (špatné škálování nebo pád). Změna gainu nad `2` vyžaduje úpravu kódu.
+
 **Rate ADS1115 (rychlost vzorkování):**
 
 | Hodnota | SPS |
