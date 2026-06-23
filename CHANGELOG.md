@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Documentation
+
+### Added
+- README hardware section "Ochrana vstupů ADC (přepětí 15 V)" — documents that the
+  4-20 mA loop's ~15 V supply, present on the sensor connector, can reach the ADS1115
+  input via a shorted connector and destroy it. Zener clamps (2.4V, then 3.3V) leaked
+  in the 0-2 V signal band and distorted readings (visible at ~100 kPa on a 0-120 kPa
+  range); all were removed (6/2026). Recommends a Schottky-to-VDD clamp behind the
+  series resistor instead — references VDD rather than its own breakdown, so it does
+  not leak below VDD while still holding the pin to ~VDD+0.3 V on a 15 V fault.
+
 ## main.py 1.5.0
 
 ### Added
