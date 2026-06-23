@@ -50,6 +50,33 @@ LED indikátory (volitelné, jedna na senzor):
 
 Každý senzor má vlastní `convert_raw()` metodu pro převod ADC hodnoty na výstupní veličinu.
 
+### Ochrana vstupů ADC (přepětí 15 V)
+
+> ⚠️ **Důležité pro budoucí HW revizi.** Proudová smyčka 4–20 mA je napájená ~15 V a toto napětí je přítomné na konektoru tlakového senzoru. **Zkratuje-li někdo kolíky konektoru, dostane se 15 V přímo na vstup ADS1115 a zničí ho.** Proto vstupy potřebují přepěťovou ochranu.
+
+**Co nepoužívat — Zenerova dioda na GND.** Původně tam byly ochranné zenerky (2.4 V, později zkoušeno 3.3 V). Obě **viditelně zkreslovaly měření** (např. 100 kPa na rozsahu 0–120 kPa), protože signál jde až ~2 V a sedí v měkkém koleni zenerky → prosakování. Vyšší zenerku nelze použít: abs. max vstupu ADS1115 je **VDD + 0.3 V ≈ 3.6 V**, takže clamp musí držet pin pod 3.6 V, což zenerku nutí do signálového rozsahu. Zenerky byly nakonec **všechny odstraněny** (6/2026).
+
+**Správné řešení — Schottky na VDD.** Dioda katodou na VDD (3.3 V), anodou na pin ADC, za sériovým rezistorem:
+
+```
+ vstup ──[ R_series ]──┬────────── ADS1115 IN
+                       │
+                      ─┴─ Schottky (anoda dole, katoda nahoře)
+                      /_\  např. BAT54
+                       │
+                      VDD = 3.3 V
+```
+
+- **Normální provoz:** signál 0–2 V je pod VDD → dioda v závěru, únik ~nA, **žádné zkreslení**.
+- **Fault 15 V:** dioda otevře, zaklemuje pin na ~VDD + 0.3 V ≈ 3.6 V (= abs. max) a přebytek svede do VDD. Proud diodou ≈ (15 − 3.6) / R_series.
+
+| R_series | Fault proud | Pozn. |
+|----------|-------------|-------|
+| 3.3 kΩ | ~3.5 mA | původní hodnota |
+| 10 kΩ | ~1.1 mA | šetrnější; vstupní proud ADS1115 je v řádu nA, takže větší R přesnost neovlivní |
+
+Použij Schottky s nízkým Vf (BAT54). **BAT54S** (dvojitá v sérii) přidá i spodní clamp na GND pro záporné poruchy. Schottky referencuje VDD, ne vlastní průraz — proto pod VDD neprosakuje a řeší přesně to, kde zenerka selhala.
+
 ### Rozlišení ADC a přesnost měření
 
 ADS1115 je 16-bit signed ADC. Pro single-ended měření (kladná napětí) je využito 15 bitů (0–32767 kroků).
