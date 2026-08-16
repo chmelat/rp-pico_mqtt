@@ -16,7 +16,7 @@ import json
 import usocket
 import config
 
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -357,20 +357,13 @@ class SharedResources:
         """Zobrazení hodnoty na displeji"""
         if not self.display:
             return
-        if value < -99 or value >= 1000:
-            self.display.show("----")
-        elif value < 0:
-            # Záporné: max 2 desetinná místa (např. -9.99)
-            if value <= -10:
-                self.display.show("{:.1f}".format(value))
-            else:
-                self.display.show("{:.2f}".format(value))
-        elif value >= 100:
-            self.display.show("{:.1f}".format(value))
-        elif value >= 10:
-            self.display.show("{:.2f}".format(value))
-        else:
-            self.display.show("{:.3f}".format(value))
+        if -99 <= value < 1000:
+            for p in (3, 2, 1, 0):
+                s = "{:.{}f}".format(value, p)
+                if len(s.replace(".", "")) <= 4:  # tečka má vlastní segment
+                    self.display.show(s)
+                    return
+        self.display.show("----")
 
     def show_error(self, code):
         """Zobrazení chyby na displeji"""
@@ -386,8 +379,7 @@ class SensorChannel:
         self.shared = shared
         self.channel = cfg["channel"]
         self.topic = cfg["topic"]
-        self.status_topic = cfg.get("status_topic", cfg["topic"] + "/status")
-        self.name = cfg.get("name", "CH{}".format(self.channel))
+        self.status_topic = cfg["topic"] + "/status"
         self.led_pin = cfg.get("led_pin", None)
         self.precision = cfg.get("precision", 3)
         self.last_value = None
@@ -441,15 +433,12 @@ class CurrentLoopSensor(SensorChannel):
     def __init__(self, shared, cfg):
         super().__init__(shared, cfg)
         self.r_bocnik = cfg["r_bocnik"]
-        self.i_min = cfg.get("i_min", 0.004)
-        self.i_max = cfg.get("i_max", 0.020)
-        self.i_disconnect = cfg.get("i_disconnect", 0.001)
         self.p_min = cfg["p_min"]
         self.p_max = cfg["p_max"]
-        self.v_min = self.i_min * self.r_bocnik
-        self.v_max = self.i_max * self.r_bocnik
-        self.v_disconnect = (self.i_disconnect * self.r_bocnik
-                             if self.i_disconnect is not None else None)
+        self.v_min = cfg.get("i_min", 0.004) * self.r_bocnik
+        self.v_max = cfg.get("i_max", 0.020) * self.r_bocnik
+        i_disc = cfg.get("i_disconnect", 0.001)
+        self.v_disconnect = i_disc * self.r_bocnik if i_disc is not None else None
 
     def convert_raw(self, raw):
         """Převod raw ADC hodnoty na tlak"""
@@ -495,14 +484,9 @@ class PiraniSensor(SensorChannel):
         self.p_min = cfg.get("p_min", 1e-4)
         self.p_max = cfg.get("p_max", 1000.0)
 
-        if self.u_divider <= 0:
-            raise ValueError("u_divider must be > 0")
-        if self.u_min < 0:
-            raise ValueError("u_min must be >= 0")
-        if self.u_max <= self.u_min:
-            raise ValueError("u_max must be > u_min")
-        if self.p_max <= self.p_min:
-            raise ValueError("p_max must be > p_min")
+        if (self.u_divider <= 0 or not 0 <= self.u_min < self.u_max
+                or self.p_max <= self.p_min):
+            raise ValueError("pirani: u_divider>0, 0<=u_min<u_max, p_min<p_max")
 
     def convert_raw(self, raw):
         """Převod raw ADC hodnoty na tlak přes regresní model"""
@@ -596,24 +580,10 @@ class SensorManager:
         self._btn_last = now
         self._display_sensor = (self._display_sensor + 1) % len(self.sensors)
 
-    def _read_all(self):
-        """Čtení ze všech senzorů"""
-        for s in self.sensors:
-            s.read()
-
-    def _publish_all(self):
-        """Publikování hodnot ze všech senzorů, vrací True pokud vše OK"""
-        all_ok = True
-        for s in self.sensors:
-            if not s.publish():
-                all_ok = False
-        return all_ok
-
     def _publish_diag(self):
         """Publikování diagnostických informací jako JSON"""
-        uptime = self._uptime_s
         diag = {
-            "uptime": uptime,
+            "uptime": self._uptime_s,
             "mem": gc.mem_free(),
             "buf": len(self.shared._pub_buffer),
             "reconn_wifi": self.shared.reconn_wifi,
@@ -635,15 +605,10 @@ class SensorManager:
         s = self.sensors[self._display_sensor]
 
         # Pokud je chyba připojení, střídáme hodnotu (2s) a chybu (0.5s)
-        has_conn_error = self._conn_error is not None
-        has_valid_value = s.last_value is not None
-        has_no_sensor_error = not s.last_error
-
-        if has_conn_error and has_valid_value and has_no_sensor_error:
-            cycle = time.ticks_ms() % 2500
-            if cycle >= 2000:
-                self.shared.show_error(self._conn_error)
-                return
+        if (self._conn_error and s.last_value is not None and not s.last_error
+                and time.ticks_ms() % 2500 >= 2000):
+            self.shared.show_error(self._conn_error)
+            return
 
         if s.last_error:
             self.shared.show_error(s.last_error)
@@ -679,12 +644,17 @@ class SensorManager:
                 self.shared._close_mqtt()
                 self.shared.start_wifi_reconnect()
 
-            self._read_all()
+            for s in self.sensors:
+                s.read()
 
             if wifi_ok:
                 self.shared.flush_buffer()
 
-            publish_ok = self._publish_all()
+            # explicitní smyčka: all(genexp) by po prvním selhání zkratovala
+            publish_ok = True
+            for s in self.sensors:
+                if not s.publish():
+                    publish_ok = False
 
             if wifi_ok and config.DIAG_INTERVAL > 0:
                 self._diag_counter += 1

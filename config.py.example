@@ -48,7 +48,6 @@ SENSORS = [
         "type": "current_loop",      # typ převodu
         "channel": 0,                # ADC kanál
         "topic": "sensor/L200h/p1" , # MQTT topic
-        "name": "p1",                # pro debug
         # Parametry specifické pro current_loop:
         "led_pin": 15,     # pin pro LED indikátor aktivního senzoru (None = bez LED)
         "r_bocnik": 99.1,  # [Ohm]
@@ -64,7 +63,6 @@ SENSORS = [
         "channel": 1,
         "topic": "sensor/L200h/pirani",
         "led_pin": 16,     # pin pro LED indikátor aktivního senzoru (None = bez LED)
-        "name": "Pirani",
         # Regresní koeficienty: p = exp(a + b*u + c*sqrt(u)) [mbar], [u - 0-10V]
         "a": -6.435,
         "b": 0.7418,

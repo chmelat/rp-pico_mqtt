@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## Documentation
 
+### Removed (2026-08-16, ponytail audit #1–#3)
+- `ANALYSIS_REPORT.md` deleted — a one-shot 2026-03-21 snapshot of v1.3.0, superseded a
+  month later by AUDIT round #6.
+- `AUDIT.md` rounds #1–#5 (721 → 340 lines) replaced by two summary tables. Findings that
+  were still open in those rounds are **kept**, not dropped: S2, S3, S4 (round #5),
+  N6 (#4), B3 (#3), D1 and D2 (#1) now live in a "Nálezy přenesené ze starších kol"
+  section. Round #6 is unchanged — it holds the current open findings A3, A4 and D1–D7.
+- `postgres-push/AUDIT.md` (145 → 64 lines) restructured the same way; B1, B5, B6, B7
+  remain open with their full bodies, closed items collapsed to one table row each.
+- Audit finding N4 (`show_value` display overflow) marked OPRAVENO in v1.5.1.
+
 ### Added
 - README hardware section "Ochrana vstupů ADC (přepětí 15 V)" — documents that the
   4-20 mA loop's ~15 V supply, present on the sensor connector, can reach the ADS1115
@@ -12,6 +23,45 @@ All notable changes to this project will be documented in this file.
   range); all were removed (6/2026). Recommends a Schottky-to-VDD clamp behind the
   series resistor instead — references VDD rather than its own breakdown, so it does
   not leak below VDD while still holding the pin to ~VDD+0.3 V on a 15 V fault.
+
+## main.py 1.5.1
+
+Simplification pass from `PONYTAIL_AUDIT.md` (findings #6, #8–#11, #13–#15). No
+behaviour change except the display fix below; `main.py` is 32 lines shorter.
+
+### Fixed
+- `show_value` could overflow the 4-digit display for values that round up across an
+  order boundary: 99.999 rendered as `100.00` (5 digit positions), -9.999 as `-10.00`,
+  999.95 as `1000.0`. The format is now chosen by fit — the most decimals that still fit
+  4 positions — instead of by a fixed range cascade. Verified against the old logic over
+  18881 values: the only differences are the three overflow cases above.
+
+### Changed
+- `show_value` — 4-branch range cascade replaced by a fit loop.
+- `PiraniSensor.__init__` — four separate `ValueError` raises collapsed into one guard;
+  the message names all three constraints (`u_divider>0, 0<=u_min<u_max, p_min<p_max`)
+  so `create_sensor()` still prints usable diagnostics.
+- `_read_all` / `_publish_all` inlined into `run()` (one caller each). The publish loop
+  stays explicit on purpose — `all(s.publish() for s in ...)` would short-circuit and
+  skip publishing the remaining sensors after the first failure.
+- `_update_display` — three single-use booleans and the `cycle` alias folded into one
+  condition.
+- `CurrentLoopSensor` — `v_min`/`v_max`/`v_disconnect` derived directly from the config
+  keys; the `i_min`/`i_max`/`i_disconnect` attributes were only ever read on the next
+  line. Config keys are unchanged.
+
+### Removed
+- Unused `SensorChannel.name` attribute and the `name` config key (assigned, never read).
+  Dropped from `config.py.example` and the README config table/examples.
+- `status_topic` config key — never set by any config; `{topic}/status` is now derived
+  unconditionally. The MQTT topic itself is unchanged.
+
+### Kept (audit findings rejected)
+- paho-mqtt 1.x/2.x compatibility shim in `mqtt_to_postgres.py` — the daemon host's paho
+  version is unverified; removing it would break startup on 1.x.
+- `wdt.feed()` inside the ADC sampling loop — dead at `ADC_SAMPLES=5`, but not in the
+  config space: 100 samples at `ADC_RATE=0` (8 SPS) would block ~12.5 s against the 8 s
+  watchdog.
 
 ## main.py 1.5.0
 

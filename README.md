@@ -336,8 +336,6 @@ Seznam senzorů se konfiguruje v poli `SENSORS`. Společné parametry:
 | `type` | ano | Typ senzoru: `"current_loop"`, `"pirani"`, nebo vlastní |
 | `channel` | ano | ADC kanál (0-3) |
 | `topic` | ano | MQTT topic pro publikaci hodnoty |
-| `name` | ne | Název pro debug (výchozí: `"CH{channel}"`) |
-| `status_topic` | ne | MQTT topic pro stav senzoru (výchozí: `{topic}/status`) |
 | `precision` | ne | Počet desetinných míst pro MQTT (výchozí: 3) |
 | `led_pin` | ne | GPIO pin pro LED indikátor aktivního senzoru (`None` = bez LED) |
 
@@ -375,7 +373,6 @@ SENSORS = [
         "type": "current_loop",
         "channel": 0,
         "topic": "sensor/L200h/p1",
-        "name": "p1",
         "led_pin": 15,        # GPIO pin pro LED indikátor (None = bez LED)
         "r_bocnik": 99.1,     # [Ohm]
         "i_min": 0.004,       # [A]
@@ -390,7 +387,6 @@ SENSORS = [
         "channel": 1,
         "topic": "sensor/L200h/pirani",
         "led_pin": 16,        # GPIO pin pro LED indikátor (None = bez LED)
-        "name": "Pirani",
         "a": -6.435,
         "b": 0.7418,
         "c": 0.8018,
