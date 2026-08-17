@@ -2,7 +2,7 @@
 # Device: RPI Pico 2W
 # Podpora více heterogenních senzorů na ADS1115
 #
-from machine import I2C, Pin, WDT
+from machine import I2C, Pin, WDT, reset
 import micropython
 from ads1x15 import ADS1115
 import tm1637
@@ -16,7 +16,7 @@ import json
 import usocket
 import config
 
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -214,7 +214,7 @@ class SharedResources:
                 self.wdt.feed()
         if not vals:
             return None, ERR_ADC
-        return sum(vals) // len(vals), None
+        return sum(vals) / len(vals), None
 
     def _close_mqtt(self):
         """Uzavření MQTT spojení a uvolnění socketu"""
@@ -277,8 +277,8 @@ class SharedResources:
                                 keepalive=config.MQTT_KEEPALIVE)
             client.set_last_will(config.MQTT_STATUS_TOPIC,
                                  "offline", retain=True)
-            client.connect()
-            client.sock.settimeout(2)  # přístup k internímu atributu umqtt.simple — umqtt nenabízí veřejné API pro nastavení socket timeoutu
+            client.connect(timeout=4)  # umqtt nastaví timeout před sock.connect() i před čtením CONNACK — bez toho blokuje mrtvý broker do WDT resetu
+            client.sock.settimeout(2)  # provozní timeout pro publish/ping; přístup k internímu atributu — umqtt jinou cestu nenabízí
             client.publish(config.MQTT_STATUS_TOPIC, "online", retain=True)
             self.mqtt = client
             if self._mqtt_ever_connected:
@@ -529,7 +529,7 @@ def create_sensor(shared, cfg):
         return None
     try:
         return cls(shared, cfg)
-    except (KeyError, ValueError) as e:
+    except Exception as e:  # i TypeError — např. číslo v uvozovkách v configu
         print("Chybná konfigurace senzoru:", e)
         return None
 
@@ -693,4 +693,8 @@ if __name__ == "__main__":
             d.show(ERR_FATAL)
         except Exception:
             pass
-        # WDT resetuje zařízení
+        # Restart vlastní silou: při výjimce z __init__ ještě WDT neběží (zapíná se
+        # v run()), zařízení by jinak zůstalo navěky stát na E--5.
+        # 5 s < WDT_TIMEOUT_MS → chování je stejné i s běžícím WDT.
+        time.sleep_ms(5000)
+        reset()

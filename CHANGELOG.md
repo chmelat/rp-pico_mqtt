@@ -24,6 +24,61 @@ All notable changes to this project will be documented in this file.
   series resistor instead — references VDD rather than its own breakdown, so it does
   not leak below VDD while still holding the pin to ~VDD+0.3 V on a 15 V fault.
 
+## main.py 1.5.2
+
+Reakce na externí review (`Audit #7` v `AUDIT.md`). Ze 14 nálezů byly tři reálné, jeden
+audit minul; zbytek zamítnut — zdůvodnění v tabulce Auditu #7 a v sekci "Kept" níže.
+
+### Fixed
+- **A3 — `MQTTClient.connect()` bez timeoutu.** Responzivní TCP + mrtvý broker (přijme
+  syn-ack, nepošle CONNACK) blokoval `connect()` do WDT resetu, a to i s TCP pre-testem,
+  protože umqtt otevírá vlastní socket. Doporučení z auditu #6 (monkey-patch `client.sock`)
+  bylo zbytečné a fungovat nemohlo — `connect()` si `self.sock` přepisuje. Vlastní
+  `umqtt.simple` má `connect(clean_session=True, timeout=None)` a nastavuje
+  `sock.settimeout()` **před** `sock.connect()` i před čtením CONNACK, takže stačilo
+  `client.connect(timeout=4)`. TCP pre-test zůstává (nálezy A3 i A4 se ho netýkají),
+  přestal ale být jedinou obranou.
+- **`E--5` bez restartu.** FATAL handler zobrazil `E--5` a skript skončil; komentář
+  „WDT resetuje zařízení" platil jen pro výjimku z `run()`. WDT se zapíná až v `run()`,
+  takže výjimka v `SensorManager.__init__` (`I2C()`, `Pin()` pro LED, tlačítko) nechala
+  zařízení stát navěky bez obnovy. Handler teď po 5 s volá `machine.reset()`. Oprava je
+  v handleru, ne v `try/except` okolo `I2C()`, aby pokryla všechny tři zdroje výjimek
+  jednou změnou. 5 s je pod `WDT_TIMEOUT_MS` (8000) → stejné chování bez ohledu na to,
+  kde výjimka vznikla.
+- **`create_sensor()` chytal jen `(KeyError, ValueError)`.** Chybějící klíč byl pokrytý,
+  ale číslo v uvozovkách (`"r_bocnik": "100"`) dá `TypeError` a shodilo to celý program
+  do FATAL handleru místo přeskočení jednoho senzoru. Rozšířeno na `except Exception`.
+  Nález D5 (tichá chyba bez displeje/diag) zůstává otevřený.
+
+### Changed
+- `read_adc_channel` — `sum(vals) // len(vals)` → `sum(vals) / len(vals)`. Celočíselné
+  dělení zahazovalo až 0,5 LSB; `raw` se používá výhradně v `raw * v_ref / 32767`, žádný
+  kód `int` nepředpokládal. Měřeno na 5 vzorcích a rozsahu 0–120 kPa je rozdíl 0,004 kPa.
+
+### Kept (audit findings rejected)
+- **Hesla v `config.py`** — audit to označil za „bezpečnostní katastrofu", ale `config.py`
+  je v `.gitignore` od `ba57aff` a v historii jsou jen placeholdery (`"tvoje_heslo"`).
+  Do gitu nic neuniklo. Reálná expozice byl `cat main.py config.py | llm`, kterým ten
+  audit vznikl.
+- **Záporná čísla na displeji** — `tm1637.py` mapuje `'-'` (ord 45) na `_SEGMENTS[37]`
+  = `0x40`, tedy prostřední segment. `-5.5` → `"-5.50"` → 4 pozice, zobrazí se správně.
+  Navrhovaná „oprava" (nahradit zápornou hodnotu za `"-"`) by funkční věc rozbila.
+- **`if i % 10 == 9` ve vzorkovací smyčce** — při `ADC_SAMPLES=5` opravdu neproběhne, ale
+  to je pojistka pro vysoké `ADC_SAMPLES` a tam funguje. Audit navíc počítal špatně:
+  200 vzorků při 64 SPS je 3,1 s, ne >8 s, a feed by padl každých 156 ms. Už zamítnuto
+  jako `PONYTAIL_AUDIT.md` #12.
+- **`str(payload)` alokuje kopii** — `str()` na `str` vrací tentýž objekt.
+- **`deque` místo `pop(0)`** — MicroPython `deque` vyžaduje `maxlen` a indexaci `[0]`
+  nemá spolehlivě; `pop(0)` na 200 prvcích jsou mikrosekundy v jednosekundovém cyklu.
+- **Chybějící `ERR_WIFI`/`ERR_MQTT`/`ERR_AUTH` v `ERR_MQTT_MSG`** — `last_error` se plní
+  jen z `read_adc_channel()` a `convert_raw()`, které vracejí výhradně
+  `ERR_CFG`/`ERR_ADC`/`ERR_LO`/`ERR_HI`/`ERR_NC`. Ty tři se tam nedostanou.
+- **`ntptime.timeout` jako globální mutace** — modulová proměnná je jediné API, které
+  `ntptime` nabízí, a `_sync_ntp()` je jediný volající.
+- **`gc.collect()` každý cyklus** — záměr na 264 KB heapu; jednotky ms proti 1 s cyklu.
+- **Rozdělení `SharedResources` a `config.py`** — u `SharedResources` si to audit sám
+  rozmyslel; `config.py` jako jediný konfigurační soubor je záměr (viz `CLAUDE.md`).
+
 ## main.py 1.5.1
 
 Simplification pass from `PONYTAIL_AUDIT.md` (findings #6, #8–#11, #13–#15). No

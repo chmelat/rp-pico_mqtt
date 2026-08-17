@@ -2,6 +2,34 @@
 
 ---
 
+## Audit #7 — externí review (verze 1.5.1)
+
+**Datum:** 2026-08-17
+**Soubory:** `main.py`, `config.py`
+**Zdroj:** externí model (`quen_audit.txt`, 14 nálezů), ověřeno proti kódu, git historii a `knihovny/`
+
+Ze 14 nálezů tři platily, jeden audit minul, deset zamítnuto. Zamítnutí jsou tu zapsaná
+se zdůvodněním, aby se nálezy nevracely v dalších kolech.
+
+| ID | Nález | Verdikt |
+|----|-------|---------|
+| Q1 | `MQTTClient.connect()` bez timeoutu | **PLATÍ** = A3 → **OPRAVENO** (v1.5.2). Navržená oprava (monkey-patch `client.sock`) byla chybná, `connect()` si socket přepisuje. |
+| Q2 | `create_sensor()` chytá jen `(KeyError, ValueError)` — `TypeError` propadne | **PLATÍ** → **OPRAVENO** (v1.5.2), `except Exception`. |
+| Q3 | `sum(vals) // len(vals)` zahazuje až 0,5 LSB | **PLATÍ** → **OPRAVENO** (v1.5.2), float průměr; rozdíl 0,004 kPa na rozsahu 0–120 kPa. |
+| Q4 | `E--5` bez restartu — WDT se zapíná až v `run()`, výjimka z `__init__` nechá zařízení stát navěky | **NOVÉ** (audit to minul, popsal jen nezachycený `I2C()` OSError) → **OPRAVENO** (v1.5.2), `reset()` po 5 s. |
+| Q5 | Hesla v `config.py` = „bezpečnostní katastrofa" | **ZAMÍTNUTO** — `config.py` je v `.gitignore` od `ba57aff`, v historii jen placeholdery. Reálná expozice byl `cat config.py \| llm`, kterým audit vznikl, ne git. |
+| Q6 | TM1637 neumí záporné znaménko, `-5.5` se zobrazí jako `+5.50` | **ZAMÍTNUTO** — `tm1637.py` mapuje `'-'` (ord 45) na `_SEGMENTS[37]` = `0x40`. `"-5.50"` = 4 pozice, zobrazí se správně. Navržená oprava by funkční věc rozbila. |
+| Q7 | `if i % 10 == 9` — WDT se ve vzorkovací smyčce nekrmí vůbec | **ZAMÍTNUTO** — pojistka pro vysoké `ADC_SAMPLES`, tam funguje. Audit počítal špatně: 200 vzorků při 64 SPS = 3,1 s, ne >8 s. Viz `PONYTAIL_AUDIT.md` #12. |
+| Q8 | Odstranit TCP pre-test | **ZAMÍTNUTO** — po Q1 je redundantní, ale ponechán záměrně (rozhodnutí uživatele); A4 se ho drží. |
+| Q9 | `str(payload)` alokuje kopii | **ZAMÍTNUTO** — `str()` na `str` vrací tentýž objekt. |
+| Q10 | `deque` místo `pop(0)` | **ZAMÍTNUTO** — MicroPython `deque` vyžaduje `maxlen`, indexaci `[0]` nemá spolehlivě; 200 prvků = mikrosekundy v 1 s cyklu. |
+| Q11 | Chybějící `ERR_WIFI`/`ERR_MQTT`/`ERR_AUTH` v `ERR_MQTT_MSG` | **ZAMÍTNUTO** — `last_error` se plní jen z `read_adc_channel()`/`convert_raw()`, které vracejí výhradně `ERR_CFG`/`ERR_ADC`/`ERR_LO`/`ERR_HI`/`ERR_NC`. |
+| Q12 | `ntptime.timeout` je globální mutace | **ZAMÍTNUTO** — modulová proměnná je jediné API `ntptime`; `_sync_ntp()` je jediný volající. |
+| Q13 | `gc.collect()` každý cyklus | **ZAMÍTNUTO** — záměr na 264 KB heapu, jednotky ms proti 1 s cyklu. |
+| Q14 | `SharedResources` je God Object, rozdělit `config.py` | **ZAMÍTNUTO** — u `SharedResources` si to audit sám rozmyslel; jeden konfigurační soubor je záměr (`CLAUDE.md`). |
+
+---
+
 ## Audit #6 — kritický review (verze 1.3.0)
 
 **Datum:** 2026-04-18
@@ -14,7 +42,7 @@
 |----|-----------|-------|------|
 | A1 | ~~VYSOKÁ~~ | WDT starvation v `flush_buffer()` — feed jen každých 10 zpráv × 2s timeout | **OPRAVENO** (v1.3.1) |
 | A2 | ~~VYSOKÁ~~ | WDT starvation v `_publish_all()` — 0 feedů mezi N publish × 2s timeout | **OPRAVENO** (v1.3.1) |
-| A3 | VYSOKÁ | `MQTTClient.connect()` bez timeoutu — responsivní TCP + mrtvý broker blokuje do WDT resetu | Otevřeno |
+| A3 | ~~VYSOKÁ~~ | `MQTTClient.connect()` bez timeoutu — responsivní TCP + mrtvý broker blokuje do WDT resetu | **OPRAVENO** (v1.5.2) |
 | A4 | STŘEDNÍ | `getaddrinfo()` bez uživatelského timeoutu — DNS blok až ~5s | Otevřeno |
 | A5 | ~~STŘEDNÍ~~ | Timezone mismatch Pico (local bez tz) vs. Postgres daemon (UTC s tz) | **OPRAVENO** (v1.4.0) |
 | A6 | ~~NÍZKÁ~~ | `_offset_day` inicializován z pre-NTP RTC v `__init__` | **OPRAVENO** (v1.4.0) |
@@ -72,7 +100,7 @@ def publish(self, topic, payload, retain=True):
 
 ---
 
-### A3 — `MQTTClient.connect()` bez timeoutu (VYSOKÁ)
+### A3 — `MQTTClient.connect()` bez timeoutu (VYSOKÁ) — OPRAVENO ve v1.5.2
 
 **Soubor:** `main.py:307–308`
 
@@ -81,20 +109,17 @@ client.connect()                   # blokuje dokud CONNACK, bez timeoutu
 client.sock.settimeout(2)          # až poté
 ```
 
-TCP pre-test (řádky 275–290) chytí nedostupného brokera. Ale **responsivní TCP + mrtvý MQTT broker** (broker přijme TCP syn-ack, nepošle CONNACK) → `client.connect()` blokuje do WDT resetu. umqtt.simple nemá veřejné API pro nastavení socket timeoutu před `connect()`.
+TCP pre-test (řádky 275–290) chytí nedostupného brokera. Ale **responsivní TCP + mrtvý MQTT broker** (broker přijme TCP syn-ack, nepošle CONNACK) → `client.connect()` blokuje do WDT resetu.
 
-**Doporučení:** patch umqtt nebo vlastní wrapper, který vytvoří socket s timeoutem:
+**Původní doporučení (monkey-patch `client.sock = sock` s vlastním socketem) bylo chybné** a vycházelo z nesprávného tvrzení, že umqtt.simple nemá veřejné API pro socket timeout. `connect()` si `self.sock` vytváří sám a přepsal by ho. Skutečná signatura:
 
 ```python
-import usocket
-sock = usocket.socket()
-sock.settimeout(4)
-addr = usocket.getaddrinfo(broker, port)[0][-1]
-sock.connect(addr)
-# pak předat do MQTTClient přes monkey-patch: client.sock = sock
+def connect(self, clean_session=True, timeout=None):
+    self.sock = socket.socket()
+    self.sock.settimeout(timeout)   # PŘED sock.connect() i před čtením CONNACK
 ```
 
-Alternativa: zmenšit `MQTT_KEEPALIVE` + zvětšit `WDT_TIMEOUT_MS` (nepreferované).
+**Oprava (v1.5.2):** `client.connect(timeout=4)`. Pokrývá oba scénáře — SYN bez odpovědi i responzivní TCP bez CONNACK. Řádek `client.sock.settimeout(2)` zůstává, nastavuje provozní timeout pro publish/ping. TCP pre-test se nemazal.
 
 ---
 
