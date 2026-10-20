@@ -254,6 +254,33 @@ Veškeré parametry jsou v souboru `config.py`.
 | `MQTT_USER` | `None` | MQTT username (`None` = anonymní přístup) |
 | `MQTT_PASSWORD` | `None` | MQTT heslo |
 
+### NTP
+
+| Parametr | Výchozí | Popis |
+|----------|---------|-------|
+| `NTP_HOST` | (nenastaveno) | Nepovinné: IP adresa NTP serveru. Bez této volby `pool.ntp.org` |
+
+Bez `NTP_HOST` se čas synchronizuje z `pool.ntp.org` přes DNS. DNS dotaz neomezuje žádný
+timeout: když Wi-Fi funguje, ale DNS neodpovídá (typicky router bez internetu), může dotaz
+blokovat déle než watchdog (8 s) a zařízení se restartuje. NTP se volá při bootu (watchdog
+ještě neběží, bez rizika), denně po 01:00 UTC, po každém obnovení Wi-Fi a před první
+úspěšnou synchronizací každých ~10 min.
+
+Riziko odstraní `NTP_HOST` zadaný jako **IP adresa** (ne hostname, ten by DNS potřeboval):
+
+1. **NTP server v lokální síti** (typicky router), např. `NTP_HOST = "192.168.1.1"`.
+   Nejlepší varianta: funguje i při výpadku internetu.
+2. **Veřejná služba se stálou anycast adresou:**
+   - Cloudflare (`time.cloudflare.com`): `162.159.200.1` nebo `162.159.200.123`
+   - Google (`time.google.com`): `216.239.35.0`, `216.239.35.4`, `216.239.35.8` nebo `216.239.35.12`
+
+   Pro přesnost na sekundy jsou rovnocenné (Google rozkládá přestupnou sekundu do celého
+   dne, rozdíl jsou desítky ms). Při výpadku internetu nefungují, stejně jako `pool.ntp.org`.
+
+IP adresu z `pool.ntp.org` natvrdo nezadávat: pool při každém dotazu vrací jiné
+dobrovolnické servery, které se mohou časem vyřadit, a projekt NTP Pool vpisování
+svých IP do zařízení výslovně nedoporučuje.
+
 ### Piny
 
 | Parametr | Výchozí | Popis |
@@ -429,7 +456,7 @@ Každý senzor publikuje na **dvě témata**:
 
 | Topic | Obsah | retain | Kdy |
 |-------|-------|--------|-----|
-| `topic` | Hodnota + timestamp UTC (ISO 8601 s `Z`), např. `"23.456 2026-04-18T12:00:00Z"` | True | Pouze při platné hodnotě |
+| `topic` | Hodnota + timestamp UTC (ISO 8601 s `Z`), např. `"23.456 2026-04-18T12:00:00Z"`; před první synchronizací NTP jen hodnota (`"23.456"`), čas pak doplní démon při příjmu | True (bez času False) | Pouze při platné hodnotě |
 | `status_topic` | Stav senzoru | False | Vždy |
 
 Stav senzoru (`status_topic`) je vždy přítomen a nabývá hodnot:

@@ -2,6 +2,258 @@
 
 ---
 
+## Audit #8 — dlouhodobá stabilita (verze 1.5.2)
+
+**Datum:** 2026-10-20
+**Soubory:** `main.py`, `postgres-push/mqtt_to_postgres.py`, `postgres-push/mqtt-to-postgres.service`
+**Zaměření:** chyby, které se projeví až po dnech nebo týdnech provozu: přetečení `ticks_ms`,
+stavy, ze kterých se zařízení samo nedostane, a skryté resety WDT.
+**Ověření:** přetečení `ticks` simulací (snippet u L1), chování `umqtt.simple` proti upstream
+zdroji (micropython-lib, `umqtt.simple` 1.8.1), regrese NTP proti `git show 2955047`.
+
+| ID | Závažnost | Popis | Stav |
+|----|-----------|-------|------|
+| L1 | ~~KRITICKÁ~~ | Zastaralý backoff deadline + přetečení `ticks_ms` → reconnect MQTT i ADC zablokovaný až na 6,2 dne | **OPRAVENO** (v1.5.3) |
+| L2 | ~~VYSOKÁ~~ | Regrese B1 (#3) ve v1.4.0: když je NTP nedostupné, zkouší se v **každé** smyčce (5 s blok); dvě volání v jedné iteraci = WDT reset | **OPRAVENO** (v1.5.3) |
+| L3 | VYSOKÁ | `umqtt` `wait_msg()` volá `setblocking(True)` → po prvním pingu je `settimeout(2)` pryč; zombie spojení končí WDT resetem, ne reconnectem | Otevřeno |
+| L4 | STŘEDNÍ | `_mqtt_auth_err` navždy (= D1 z #6): jedno přechodné rc 4/5 od brokeru vypne MQTT až do ručního resetu | Otevřeno |
+| L5 | ~~STŘEDNÍ~~ | Před prvním úspěšným NTP se publikují časy z roku 2021 a démon je zapíše do DB | **OPRAVENO** (v1.5.3) |
+| L6 | NÍZKÁ | Únik socketu v chybové větvi `connect_mqtt()` | Otevřeno |
+| L7 | NÍZKÁ | Chybí eskalace: zaseknutý CYW43 nebo I2C sběrnice se neobnoví bez restartu napájení | Otevřeno, řešit jen při výskytu |
+| L8 | ~~NÍZKÁ~~ | Tlačítko trpí stejnou chybou jako L1: po více než 6,2 dne bez stisku může až 6,2 dne nereagovat | **OPRAVENO** (v1.5.3) |
+| L9 | INFO | Skryté resety WDT nejsou vidět: diag nemá `reset_cause` a démon diag zahazuje (S4) | Otevřeno |
+
+Nálezy k démonovi (B8–B10) jsou v `postgres-push/AUDIT.md`.
+
+---
+
+### L1 — Zastaralý deadline + přetečení `ticks_ms` (KRITICKÁ) — OPRAVENO ve v1.5.3
+
+**Soubor:** `main.py:159`, `main.py:171`, `main.py:241`
+
+`ticks_ms()` na rp2 má periodu 2^30 ms (12,4 dne) a `ticks_diff()` vrací znaménkový rozdíl
+v rozsahu ±2^29 ms (±6,2 dne). Deadline starší než 6,2 dne proto vypadá jako budoucí.
+
+- `check_wifi()` po reconnectu nastaví `_mqtt_next_try = 0`. Pokud je uptime v druhé
+  polovině periody (6,2–12,4 d, 18,6–24,8 d, …), `connect_mqtt()` vrací `False` na ř. 241
+  až do příštího přetečení: **až 6,2 dne bez MQTT**, na displeji E--2, a v bufferu zůstane
+  jen posledních 200 zpráv.
+- Totéž bez výpadku Wi-Fi: `_mqtt_next_try` zůstává z posledního selhání. Po 7 dnech
+  stabilního spojení stačí jeden zombie-close a reconnect je zablokovaný.
+- ADC: `_adc_next_try` zůstává 0 (nebo hodnota z posledního selhání). Jakýkoli I2C glitch po
+  6,2 dne provozu → `_init_adc()` se vrátí hned na ř. 171 → **E--3 až 6,2 dne**.
+
+Ověřeno simulací:
+
+```python
+PERIOD, HALF = 1 << 30, 1 << 29
+def ticks_diff(a, b): return ((a - b + HALF) % PERIOD) - HALF
+assert ticks_diff(int(6.3 * 86_400_000), 0) < 0   # uptime 6,3 d: "deadline 0 je v budoucnu"
+```
+
+**Oprava (3 řádky):** při ztrátě spojení posunout deadline na „teď“, aby nikdy nebyl starý:
+
+```python
+# check_wifi(), ř. 159
+self._mqtt_next_try = time.ticks_ms()
+# _close_mqtt(), uvnitř `if self.mqtt is not None:`
+self._mqtt_next_try = time.ticks_ms()
+# read_adc_channel(), except OSError vedle `self.adc = None`
+self._adc_next_try = time.ticks_ms()
+```
+
+Za běžných podmínek se chování nemění, protože deadline už je v minulosti a první pokus
+proběhne hned. Ve všech ostatních místech (`_wifi_deadline`, `_mqtt_last_ping`) se deadline
+vždy nastavuje nedávno, ty jsou v pořádku.
+
+**Implementováno ve v1.5.3 jinak** (po code review): místo resetů na třech místech se
+v `connect_mqtt()` a `_init_adc()` čeká jen na deadline v okně backoffu,
+`-backoff <= ticks_diff(now, next_try) < 0`. Pokrývá i cesty bez resetu, např. když Wi-Fi
+naskočí mimo reconnect cyklus. Hlídá to `selfcheck.py`.
+
+---
+
+### L2 — NTP retry v každé smyčce (VYSOKÁ, regrese B1) — OPRAVENO ve v1.5.3
+
+**Soubor:** `main.py:635–640`, `main.py:160`
+
+Verze 1.2.4 opravila B1 tak, že při selhání NTP posunula `_offset_day` na dnešek. V1.4.0
+(`2955047`) při odstraňování DST tuto větev smazala:
+
+```python
+if t[3] >= 1 and t[2] != self.shared._last_ntp_day:
+    if self.shared.wlan.isconnected():
+        self.shared._sync_ntp()          # při selhání se _last_ntp_day nezmění
+```
+
+Scénář „LAN funguje, internet ne“ (výpadek WAN, restart routeru): od 01:00 UTC se NTP zkouší
+v každé iteraci. Každý pokus = DNS (`pool.ntp.org`) + 5 s timeout, takže měření běží místo
+každou 1 s každých ~6 s, a to po celý den. Pokud se ve stejné iteraci dokončí Wi-Fi reconnect,
+`check_wifi()` volá `_sync_ntp()` podruhé, bez krmení WDT mezi tím: 2 × 5 s > 8 s → **WDT reset**,
+a po něm hned L5.
+
+**Oprava:**
+
+```python
+if t[3] >= 1 and t[2] != self.shared._last_ntp_day:
+    self.shared._last_ntp_day = t[2]     # jeden pokus za den, i při selhání
+    if self.shared.wlan.isconnected():
+        self.shared._sync_ntp()
+```
+
+a na začátek `_sync_ntp()` přidat `if self.wdt: self.wdt.feed()`. To zároveň zmírní N6.
+
+---
+
+### L3 — `umqtt` ruší socket timeout po prvním pingu (VYSOKÁ)
+
+**Soubor:** `main.py:281`, `main.py:318–319`
+
+Upstream `umqtt.simple`:
+
+```python
+def check_msg(self):
+    self.sock.setblocking(False)
+    return self.wait_msg()
+
+def wait_msg(self):
+    res = self.sock.read(1)
+    self.sock.setblocking(True)      # ← timeout = None, settimeout(2) je pryč
+    if res is None:
+        return None
+```
+
+Důsledky:
+
+1. Po prvním `mqtt_ping()` (30 s po connectu) je socket plně blokující. `publish()`
+   nebo `ping()` na mrtvém spojení po zaplnění TCP send bufferu visí, dokud nepřijde **WDT
+   reset**. Zařízení se tedy restartuje místo reconnectu a přijde o buffer.
+2. `check_msg()` je neblokující a volá se hned po `ping()`, takže PINGRESP aktuálního pingu
+   ještě nedorazil. Přečte se PINGRESP z pingu o 30 s dříve. Na zombie socketu, kam nic
+   nepřichází, vrátí `None`, takže **detekce zombie popsaná v `implementation_notes.md` §3
+   timeoutem nefunguje**. Odpojení se pozná jen podle RST/FIN, nebo až díky WDT.
+
+**Oprava (otestovat na zařízení alespoň 24 h, mění empiricky laděné chování z §1):**
+
+```python
+self.mqtt.ping()
+self.mqtt.wait_msg()            # čeká max 2 s na PINGRESP, jinak OSError → _close_mqtt()
+self.mqtt.sock.settimeout(2)    # wait_msg() volá setblocking(True) a timeout ruší
+```
+
+Nejhorší případ bez krmení WDT jsou 2 × 2 s. **Ověřit:** kterou verzi `umqtt.simple` má
+firmware (frozen modul). `setblocking(True)` je ve `wait_msg()` dlouhodobě, ne jen v 1.8.1.
+
+---
+
+### L4 — `_mqtt_auth_err` navždy (STŘEDNÍ, povýšení D1)
+
+**Soubor:** `main.py:235–236`, `main.py:299–302`
+
+Pro dlouhodobý běh je to víc než designová drobnost: když broker jednou vrátí rc 5 (reload
+s rozbitým ACL nebo password souborem, chvíle při startu pluginu), zařízení už nikdy nic
+nepublikuje, i když broker vzápětí funguje. Totéž dělá démon (B9).
+
+**Oprava:** místo trvalého flagu použít dlouhý backoff:
+
+```python
+# smazat `if self._mqtt_auth_err: return False`
+if isinstance(e, MQTTException) and e.args and e.args[0] in (4, 5):
+    print("MQTT auth failed:", e)
+    self._mqtt_auth_err = True                           # displej dál ukazuje E--6
+    self._mqtt_next_try = time.ticks_add(now, 300_000)   # zkusit znovu za 5 min
+    return False
+# a při úspěšném connectu:
+self._mqtt_auth_err = False
+```
+
+---
+
+### L5 — Timestampy z roku 2021 před prvním NTP (STŘEDNÍ) — OPRAVENO ve v1.5.3
+
+**Soubor:** `main.py:416–419`
+
+Po výpadku proudu naběhne Pico s RTC 2021-01-01. Pokud první NTP selže (Wi-Fi nebo WAN
+naběhne později než Pico), nejbližší další pokus přijde při Wi-Fi reconnectu, nebo až v
+RTC „den 2, 01:00“, tedy **~25 h dat s rokem 2021** v DB. Démon přitom umí payload bez
+času orazítkovat časem příjmu (`mqtt_to_postgres.py:130`).
+
+**Oprava:**
+
+```python
+t = time.gmtime()
+# ponytail: před NTP bez času, démon orazítkuje příjmem; u bufferovaných zpráv to znamená chybu až o délku bufferu
+ts = " {:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}Z".format(*t[:6]) if t[0] >= 2025 else ""
+formatted = "{:.{}f}{}".format(self.last_value, self.precision, ts)
+```
+
+S opravou L2 (pokus o NTP jednou denně) je tohle nutné. Jinak by se po neúspěšném NTP
+při bootu čekalo celý den s nesmyslným časem.
+
+---
+
+### L6 — Únik socketu při neúspěšném connectu (NÍZKÁ)
+
+**Soubor:** `main.py:293–297`
+
+`client.disconnect()` nejdřív zapisuje a teprve potom zavírá. Když zápis selže, socket zůstane
+otevřený. Pravděpodobně ho zavře finalizer při GC, ale to na zařízení ověřené není.
+`_close_mqtt()` má pro stejný případ záložní `sock.close()`, tady chybí. Oprava: na místě
+`client.disconnect()` zavřít rovnou `client.sock.close()`, DISCONNECT paket při selhaném
+connectu nemá smysl.
+
+---
+
+### L7 — Chybí eskalace pro zaseknutý hardware (NÍZKÁ)
+
+- **CYW43:** `start_wifi_reconnect()` opakuje `wlan.connect()` donekonečna. Pokud se čip
+  zasekne (u Pico W známá třída problémů), pomůže jen restart. Levná pojistka je počítat
+  vypršené `_wifi_deadline` a po ~10 (15 min) zavolat `machine.reset()`. Ztráta bufferu
+  nevadí, po 15 min výpadku už stejně drží jen posledních 200 zpráv.
+- **I2C:** když ADS1115 drží SDA v nule (typicky po resetu masteru uprostřed transakce),
+  `i2c.scan()` vrací `[]` donekonečna a `machine.reset()` nepomůže, protože ADS1115 se
+  neresetuje. Řešením je bus recovery (9 pulzů SCL přes GPIO a znovu vytvořit `I2C`)
+  v `_init_adc()`.
+
+Obojí řešit **jen pokud se trvalé E--1 / E--3 v provozu opravdu objeví**.
+
+---
+
+### L8 — Tlačítko po dlouhém klidu nereaguje (NÍZKÁ) — OPRAVENO ve v1.5.3
+
+**Soubor:** `main.py:578`
+
+`ticks_diff(now, self._btn_last) < 200` vyjde záporně, pokud je poslední stisk (nebo 0 po
+bootu) starší než 6,2 dne. Funkce se pak vrátí ještě před aktualizací `_btn_last`, takže
+tlačítko zůstane mrtvé až do přetečení. Oprava: `if 0 <= time.ticks_diff(now, self._btn_last) < 200:`.
+
+---
+
+### L9 — Skryté resety nejsou vidět (INFO)
+
+L2 i L3 končí WDT resetem, který z venku vypadá jen jako krátký výpadek. Jedinou stopou je
+pokles `uptime` v diag, jenže démon diag zahazuje (S4) a retained zpráva drží jen poslední
+hodnotu. Levné zlepšení: při bootu uložit `machine.reset_cause()` a posílat ho v diag jako
+`"rst"` (rozliší WDT_RESET od PWRON_RESET). Historii pak stačí sbírat
+`mosquitto_sub -t 'diag/#' -v` do souboru.
+
+---
+
+### Ověřeno OK z hlediska dlouhodobého běhu
+
+| Oblast | Výsledek |
+|--------|----------|
+| Zápisy do flash | žádné, opotřebení nehrozí ✓ |
+| `_uptime_s` | Python int bez přetečení ✓ (drift D3 trvá) |
+| `_wifi_deadline`, `_mqtt_last_ping` | nastavují se vždy čerstvě, ticks wrap jim nevadí ✓ |
+| `_pub_buffer` | omezený na `PUBLISH_BUFFER_MAX`, paměť nemůže růst ✓ |
+| Nezachycená výjimka v `run()` | FATAL → `reset()` po 5 s, nikdy trvalý stav ✓ |
+| Nekonečná smyčka v `ads1x15.read()` (polling OS bitu bez timeoutu) | pokryto WDT ✓ |
+| Pin IRQ → `micropython.schedule` | výjimka v naplánovaném callbacku hlavní smyčku neshodí ✓ |
+| `ticks_ms() % 2500` v `_update_display` | při přetečení jen jednorázový glitch blikání ✓ |
+
+---
+
 ## Audit #7 — externí review (verze 1.5.1)
 
 **Datum:** 2026-08-17
@@ -343,7 +595,7 @@ nálezy jsou zaznamenané v `CHANGELOG.md`. Co z nich zůstalo otevřené, je zd
 | S2 (#5) | STŘEDNÍ | WiFi credentials v `config.py` jako plaintext | Omezení platformy; `config.py` je v `.gitignore` |
 | S3 (#5) | NÍZKÁ | Diagnostika na `DIAG_TOPIC` zveřejňuje interní stav bez access control | Mitigováno fixem S1 (MQTT auth ve v1.3.0) |
 | S4 (#5) | NÍZKÁ | `mqtt_to_postgres` tiše zahazuje diag JSON jako unparseable zprávu | Totožné s B6 v `postgres-push/AUDIT.md` |
-| N6 (#4) | NÍZKÁ | `ntptime.settime()` blokuje až 5 s bez WDT feedu | `_sync_ntp()` — volá se z `__init__` (před startem WDT) i z `check_wifi()` (WDT běží); borderline při `WDT_TIMEOUT_MS=8000` |
+| N6 (#4) | NÍZKÁ | `ntptime.settime()` blokuje až 5 s bez WDT feedu | `_sync_ntp()` — volá se z `__init__` (před startem WDT) i z `check_wifi()` (WDT běží); borderline při `WDT_TIMEOUT_MS=8000`. **Zmírněno v1.5.3**: feed před každým pokusem a `ntptime.timeout` 2 s. Zbývá DNS dotaz na `pool.ntp.org`, který žádný timeout neomezuje: pomalé DNS + 2 s může přesáhnout 8 s, a před prvním NTP se pokus opakuje každých ~10 min. Nepovinná volba `NTP_HOST` (IP adresa) riziko odstraní; výchozí zůstává `pool.ntp.org` (rozhodnutí uživatele 2026-10-20). |
 | B3 (#3) | INFO | `gc.collect()` se přeskočí při přetažené iteraci (`remaining <= 0`) | Konec `run()`; MicroPython spouští GC i při selhání alokace, samoléčí se |
 | D1 (#1) | INFO | Status topic se při výpadku MQTT nebufferuje | `SensorChannel.publish()` — záměr, ale není okomentováno |
 | D2 (#1) | INFO | `_pub_buffer.pop(0)` je O(n) | `flush_buffer()` — přijatelné pro `PUBLISH_BUFFER_MAX=200` |

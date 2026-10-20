@@ -11,6 +11,10 @@ MQTT_STATUS_TOPIC = "sensor/L200h/status"  # LWT a online status
 MQTT_USER = None             # MQTT username (None = anonymní přístup)
 MQTT_PASSWORD = None         # MQTT heslo
 
+# NTP server (nepovinné, bez této volby pool.ntp.org) — IP adresa, ne hostname:
+# DNS dotaz neomezuje žádný timeout a pomalé DNS může blokovat přes WDT
+# NTP_HOST = "192.168.1.1"
+
 # I2C piny
 I2C_ID = 1              # 0 = I2C0, 1 = I2C1
 I2C_SDA = 26

@@ -24,6 +24,48 @@ All notable changes to this project will be documented in this file.
   series resistor instead — references VDD rather than its own breakdown, so it does
   not leak below VDD while still holding the pin to ~VDD+0.3 V on a 15 V fault.
 
+## main.py 1.5.3
+
+### Fixed
+- **L1 (audit #8) — reconnect MQTT/ADC zablokovaný až na 6,2 dne.** `ticks_diff()` má
+  rozsah ±2^29 ms (±6,2 d), takže deadline starší než 6,2 dne vypadal jako budoucí.
+  `check_wifi()` po reconnectu nastavoval `_mqtt_next_try = 0`, jinak zůstával deadline
+  z posledního selhání. Ve druhé polovině periody `ticks_ms` (6,2–12,4 d od bootu atd.)
+  se pak `connect_mqtt()` / `_init_adc()` vůbec nepokusily připojit, a to až do přetečení:
+  E--2 nebo E--3 po dny bez jediného pokusu a bez výpisu na konzoli. `connect_mqtt()`
+  a `_init_adc()` teď čekají jen tehdy, když deadline leží v okně aktuálního backoffu
+  (`-backoff <= ticks_diff(now, next_try) < 0`). Zastaralý deadline tak nemůže zablokovat
+  nic, ani v cestách bez explicitního resetu (např. Wi-Fi naskočí mimo reconnect cyklus).
+  Za běžných podmínek se chování nemění, backoff funguje jako dosud.
+- **L2 (audit #8) — regrese B1 z 1.4.0: NTP retry v každé smyčce.** Při odstraňování DST
+  zmizela větev, která po neúspěšném NTP posunula den resyncu. Když fungovala LAN, ale ne
+  internet, zkoušelo se od 01:00 UTC NTP v každé iteraci (DNS + 5 s), měření běželo po
+  ~6 s místo 1 s a souběh s Wi-Fi reconnectem (druhé `_sync_ntp()` bez feedu) končil WDT
+  resetem. `_last_ntp_day` se teď nastaví před pokusem, takže proběhne jeden pokus denně
+  (plus při každém Wi-Fi reconnectu). Dokud RTC nebylo synchronizováno (rok < 2025),
+  zkouší se NTP každých ~10 min, aby po neúspěšném bootu nevznikla celodenní díra. První
+  iterace se vynechává: boot sync proběhl právě předtím bez WDT a okamžitý retry pod WDT by
+  při `INTERVAL_S` ≥ 600 a visícím DNS vedl k restartům dokola.
+  `_sync_ntp()` nově krmí WDT a `ntptime.timeout` je 2 s místo 5 s (zmírňuje N6).
+  DNS dotaz na `pool.ntp.org` žádný timeout neomezuje, proto přibyla nepovinná volba
+  `NTP_HOST` (IP adresa NTP serveru), která DNS obejde. Bez ní zůstává `pool.ntp.org`
+  a riziko WDT resetu při pomalém DNS (viz N6 v `AUDIT.md`).
+- **L5 (audit #8) — časy z roku 2021 před prvním NTP.** Po bootu bez úspěšného NTP šly do
+  DB timestampy 2021-01-01. Dokud je rok RTC < 2025, publikuje se jen hodnota bez času
+  a démon doplní čas příjmu. Hodnota bez času se posílá s `retain=False` (jinak by ji
+  démon po každém reconnectu k brokeru zapsal znovu jako čerstvou) a při výpadku MQTT se
+  nebufferuje: démon by celému bufferu dal jeden čas příjmu.
+- **L8 (audit #8) — tlačítko po dlouhém klidu nereagovalo.** Stejná příčina jako L1:
+  `ticks_diff(now, _btn_last)` vyšel záporně, když byl poslední stisk (nebo 0 po bootu)
+  starší než 6,2 dne. Debounce stisk zahodil ještě před aktualizací `_btn_last`, takže
+  tlačítko zůstalo mrtvé až do přetečení `ticks_ms`. Záporný rozdíl se teď bere jako
+  starý stisk.
+
+### Added
+- `selfcheck.py` — desktopová kontrola (`python3 selfcheck.py`). Importuje skutečný
+  `main.py` s náhradami MicroPython modulů a ověřuje L1, L8 a payload/retain z L5.
+  Ověřeno, že selže při vrácení kterékoli z těchto oprav.
+
 ## main.py 1.5.2
 
 Reakce na externí review (`Audit #7` v `AUDIT.md`). Ze 14 nálezů byly tři reálné, jeden

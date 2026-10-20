@@ -16,7 +16,7 @@ import json
 import usocket
 import config
 
-VERSION = "1.5.2"
+VERSION = "1.5.3"
 
 # Napěťový rozsah podle gain
 GAIN_VREF = {
@@ -127,8 +127,12 @@ class SharedResources:
 
     def _sync_ntp(self):
         """Synchronizace RTC přes NTP. Vrátí True při úspěchu."""
+        if self.wdt:
+            self.wdt.feed()
         try:
-            ntptime.timeout = 5
+            ntptime.timeout = 2  # DNS + timeout se musí vejít do okna WDT
+            # nepovinná IP adresa serveru: DNS dotaz na hostname žádný timeout neomezuje
+            ntptime.host = getattr(config, 'NTP_HOST', ntptime.host)
             ntptime.settime()
             t = time.gmtime()
             self._last_ntp_day = t[2]
@@ -168,7 +172,7 @@ class SharedResources:
     def _init_adc(self):
         """Inicializace ADC s exponenciálním backoffem"""
         now = time.ticks_ms()
-        if time.ticks_diff(now, self._adc_next_try) < 0:
+        if -self._adc_backoff <= time.ticks_diff(now, self._adc_next_try) < 0:  # viz connect_mqtt()
             return
 
         try:
@@ -238,7 +242,9 @@ class SharedResources:
             return False
 
         now = time.ticks_ms()
-        if time.ticks_diff(now, self._mqtt_next_try) < 0:
+        # čekat jen na deadline v okně backoffu: zastaralý deadline (>6,2 d) by ticks_diff()
+        # vyhodnotil jako budoucí a reconnect by stál až do přetečení ticks (perioda 12,4 d)
+        if -self._mqtt_backoff <= time.ticks_diff(now, self._mqtt_next_try) < 0:
             return False
 
         if self.wdt:
@@ -414,14 +420,20 @@ class SensorChannel:
         # Hodnotu publikuj jen když je platná
         if self.last_value is not None:
             t = time.gmtime()
-            ts = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}Z".format(
-                t[0], t[1], t[2], t[3], t[4], t[5])
-            formatted = "{:.{}f} {}".format(self.last_value, self.precision, ts)
-            if not self.shared.publish(self.topic, formatted, retain=True):
-                buf = self.shared._pub_buffer
-                if len(buf) >= config.PUBLISH_BUFFER_MAX:
-                    buf.pop(0)
-                buf.append((self.topic, formatted, True))
+            # ponytail: před NTP (RTC na 2021) bez času, démon orazítkuje příjmem; při výpadku
+            # MQTT před NTP se hodnoty zahazují (nebufferují). Upgrade: u položek bufferu
+            # držet ticks_ms() a čas dopočítat při flushi po úspěšném NTP.
+            ts = " {:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}Z".format(
+                *t[:6]) if t[0] >= 2025 else ""
+            formatted = "{:.{}f}{}".format(self.last_value, self.precision, ts)
+            # bez času neretainovat: démon by retained hodnotu po reconnectu zapsal s aktuálním časem
+            retain = bool(ts)
+            if not self.shared.publish(self.topic, formatted, retain=retain):
+                if ts:  # bez času nebufferovat: démon by celému bufferu dal jeden čas příjmu
+                    buf = self.shared._pub_buffer
+                    if len(buf) >= config.PUBLISH_BUFFER_MAX:
+                        buf.pop(0)
+                    buf.append((self.topic, formatted, retain))
                 ok = False
 
         return ok
@@ -575,7 +587,7 @@ class SensorManager:
 
     def _btn_pressed(self, _):
         now = time.ticks_ms()
-        if time.ticks_diff(now, self._btn_last) < 200:
+        if 0 <= time.ticks_diff(now, self._btn_last) < 200:  # záporný = stisk starší než 6,2 d
             return
         self._btn_last = now
         self._display_sensor = (self._display_sensor + 1) % len(self.sensors)
@@ -633,11 +645,16 @@ class SensorManager:
             loop_start = time.ticks_ms()
 
             t = time.gmtime()
-            if t[3] >= 1 and t[2] != self.shared._last_ntp_day:
+            # před první synchronizací (RTC na 2021) zkoušet každých ~10 min, jinak jednou denně
+            # i při selhání (B1)
+            # první iteraci vynechat: boot sync proběhl právě teď bez WDT, retry pod WDT by při
+            # visícím DNS restartoval dokola (relevantní pro INTERVAL_S >= 600)
+            unsynced = (t[0] < 2025 and self._uptime_s > config.INTERVAL_S
+                        and self._uptime_s % 600 < config.INTERVAL_S)
+            if unsynced or (t[3] >= 1 and t[2] != self.shared._last_ntp_day):
+                self.shared._last_ntp_day = t[2]
                 if self.shared.wlan.isconnected():
                     self.shared._sync_ntp()
-                else:
-                    self.shared._last_ntp_day = t[2]
 
             wifi_ok = self.shared.check_wifi()
             if not wifi_ok:

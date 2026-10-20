@@ -1,9 +1,42 @@
 # Audit: mqtt_to_postgres.py
 
-Poslední kolo: #2 (v1.0.6, 2026-04-03). Uzavřené nálezy jsou v `CHANGELOG.md`,
+Poslední kolo: #3 (v1.2.1, 2026-10-20, dlouhodobá stabilita). Uzavřené nálezy jsou v `CHANGELOG.md`,
 zde zůstávají jen otevřené.
 
 ## Otevřené nálezy
+
+### B8 — Tichá smrt `db_worker` vlákna (kolo #3, 2026-10-20)
+
+**Severity: High**
+
+Výjimka vyhozená **uvnitř** handleru `except (RaiseException, IntegrityError)` (např.
+`OperationalError` z `conn.rollback()` nebo z `cur.execute()` v row-by-row smyčce, když v tu
+chvíli spadne spojení do DB) sourozenecký `except Exception` nezachytí. Vlákno skončí,
+proces dál běží, `on_message` plní `deque(maxlen=10_000)` a ta potichu zahazuje data.
+systemd nic nerestartuje, protože proces žije. Řádky rozpracovaného batche se ztratí.
+
+**Fix (2 řádky):** `import os` a `threading.excepthook = lambda args: os._exit(1)`. Smrt
+vlákna pak shodí proces a `Restart=` ho nahodí (spolu s B9).
+
+### B9 — `Restart=on-failure` nerestartuje po auth chybě (kolo #3, 2026-10-20)
+
+**Severity: Medium**
+
+`on_connect` při rc 4/5 volá `client.disconnect()`, `loop_forever()` se vrátí a `main()`
+skončí s exit kódem 0. `Restart=on-failure` na čistý exit nereaguje, takže po jednom
+přechodném auth selhání brokeru démon zůstane stát až do ručního startu.
+
+**Fix:** v `mqtt-to-postgres.service` nastavit `Restart=always`.
+
+### B10 — Retained zprávy se po reconnectu zapisují znovu (kolo #3, 2026-10-20)
+
+**Severity: Low** (ověřit)
+
+Pico publikuje hodnoty s `retain=True`. Po každém reconnectu démonu k brokeru `on_connect`
+znovu subscribuje a broker pošle poslední retained hodnotu každého senzoru, která se vloží
+podruhé se stejným timestampem. **Ověřit**, jestli `insert_sensor_value()` duplicitu odmítne.
+Pokud ne: `if msg.retain: return` v `on_message` (ztratí se jen poslední hodnota publikovaná
+během výpadku démonu, ostatní jsou stejně ztracené).
 
 ### B1 — Race condition na `collections.deque`
 

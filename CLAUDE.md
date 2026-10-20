@@ -16,6 +16,12 @@ ruff check .
 ```
 Ignore import errors for MicroPython-only modules (`machine`, `umqtt`, `ads1x15`, `tm1637`, `network`).
 
+### Self-check (desktop)
+```bash
+python3 selfcheck.py
+```
+Imports the real `main.py` with MicroPython modules stubbed; covers ticks-wraparound deadlines, button debounce and value payload/retain.
+
 ### Deploy to device
 ```bash
 # Copy both files and reset
@@ -63,7 +69,7 @@ SensorChannel          # abstract base: read() → convert_raw() → publish()
 
 **WDT safety:** `safe_sleep_ms()` feeds the hardware watchdog every `WDT_TIMEOUT_MS // 2` ms. All long waits must use this method. MQTT broker TCP pre-test uses a 4s socket timeout to prevent WDT starvation.
 
-**MQTT:** Uses `umqtt.simple`. LWT publishes `"offline"` on unexpected disconnect; `"online"` on connect. Each sensor publishes to `{topic}` (value, only when valid, `retain=True`) and `{topic}/status` (`"OK"` or error string, `retain=False`).
+**MQTT:** Uses `umqtt.simple`. LWT publishes `"offline"` on unexpected disconnect; `"online"` on connect. Each sensor publishes to `{topic}` (value + UTC timestamp, only when valid, `retain=True`; before the first NTP sync value only with `retain=False` and not buffered) and `{topic}/status` (`"OK"` or error string, `retain=False`).
 
 **Display:** Shows sensor selected by `DISPLAY_SENSOR` index. When WiFi/MQTT fails but sensor reads are valid, alternates: value (2s) / error code (0.5s).
 
