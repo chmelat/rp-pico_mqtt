@@ -71,6 +71,24 @@ v `connect_mqtt()` a `_init_adc()` čeká jen na deadline v okně backoffu,
 `-backoff <= ticks_diff(now, next_try) < 0`. Pokrývá i cesty bez resetu, např. když Wi-Fi
 naskočí mimo reconnect cyklus. Hlídá to `selfcheck.py`.
 
+**Pozorovaný incident (v1.5.2, L200h, zjištěno 2026-10-21 ze zircodb):** `L200h/p1` i
+`L200h/pirani` chybí od 2026-10-05 10:29 UTC do 2026-10-10 23:53 UTC (první buffered
+hodnota; reconnect ~23:55). Shoduje se se vším, co L1 předpovídá:
+
+- délka 5 d 13,4 h < 6,2 d (polovina periody `ticks_ms`),
+- obnova bez zásahu v sobotu v noci (01:55 SELČ), tedy v okamžiku přetečení, ne lidskou akcí,
+- chybí obě čidla krabičky (výpadek na úrovni MQTT), DB běžela (jiná čidla mají data),
+- konec dat náhlý bez předchozí degradace, tlak po mezeře navazuje na trend (měření běželo),
+- první data po mezeře začínají ~100 s před reconnectem = 200 zpráv bufferu ze 2 čidel.
+
+Přímý důkaz chybí (diag se neukládá, před 2026-09-20 má DB jen hodinové vzorky). Test:
+referenční okamžik (boot nebo poslední selhání MQTT) musí ležet o celý násobek periody
+(12 d 10 h 15 m) před reconnectem — 2026-09-28 13:38, 09-16 03:23, 09-03 17:07 nebo
+08-22 06:51 UTC. Ostatní běhy na v1.5.2 jsou čisté: 2026-09-20 → 10-05 (14,5 d) a
+10-11 → 10-21 (10,5 d) bez jediného propadu v sekundových datech (3592–3594 vzorků/h).
+Účinnost opravy v praxi lze potvrdit až po > 12,4 d běhu v1.5.3 bez podobné mezery
+(L200h od 2026-10-21 12:02 UTC, tj. ~2026-11-03).
+
 ---
 
 ### L2 — NTP retry v každé smyčce (VYSOKÁ, regrese B1) — OPRAVENO ve v1.5.3
