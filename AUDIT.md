@@ -16,7 +16,7 @@ zdroji (micropython-lib, `umqtt.simple` 1.8.1), regrese NTP proti `git show 2955
 | L1 | ~~KRITICKÁ~~ | Zastaralý backoff deadline + přetečení `ticks_ms` → reconnect MQTT i ADC zablokovaný až na 6,2 dne | **OPRAVENO** (v1.5.3) |
 | L2 | ~~VYSOKÁ~~ | Regrese B1 (#3) ve v1.4.0: když je NTP nedostupné, zkouší se v **každé** smyčce (5 s blok); dvě volání v jedné iteraci = WDT reset | **OPRAVENO** (v1.5.3) |
 | L3 | NÍZKÁ (původně VYSOKÁ) | `umqtt` `wait_msg()` volá `setblocking(True)` → po prvním pingu je `settimeout(2)` pryč; zombie spojení končí WDT resetem, ne reconnectem | Otevřeno, vědomě neopraveno (přehodnoceno 2026-10-21) |
-| L4 | STŘEDNÍ | `_mqtt_auth_err` navždy (= D1 z #6): jedno přechodné rc 4/5 od brokeru vypne MQTT až do ručního resetu | Otevřeno |
+| L4 | NÍZKÁ (původně STŘEDNÍ) | `_mqtt_auth_err` navždy (= D1 z #6): jedno přechodné rc 4/5 od brokeru vypne MQTT až do ručního resetu | Otevřeno, vědomě neopraveno (přehodnoceno 2026-10-21) |
 | L5 | ~~STŘEDNÍ~~ | Před prvním úspěšným NTP se publikují časy z roku 2021 a démon je zapíše do DB | **OPRAVENO** (v1.5.3) |
 | L6 | NÍZKÁ | Únik socketu v chybové větvi `connect_mqtt()` | Otevřeno |
 | L7 | NÍZKÁ | Chybí eskalace: zaseknutý CYW43 nebo I2C sběrnice se neobnoví bez restartu napájení | Otevřeno, řešit jen při výskytu |
@@ -175,9 +175,9 @@ firmware (frozen modul). `setblocking(True)` je ve `wait_msg()` dlouhodobě, ne 
 
 ---
 
-### L4 — `_mqtt_auth_err` navždy (STŘEDNÍ, povýšení D1)
+### L4 — `_mqtt_auth_err` navždy (NÍZKÁ, původně STŘEDNÍ, povýšení D1)
 
-**Soubor:** `main.py:235–236`, `main.py:299–302`
+**Soubor:** `main.py:239–240`, `main.py:305–308`
 
 Pro dlouhodobý běh je to víc než designová drobnost: když broker jednou vrátí rc 5 (reload
 s rozbitým ACL nebo password souborem, chvíle při startu pluginu), zařízení už nikdy nic
@@ -195,6 +195,23 @@ if isinstance(e, MQTTException) and e.args and e.args[0] in (4, 5):
 # a při úspěšném connectu:
 self._mqtt_auth_err = False
 ```
+
+**Přehodnocení (2026-10-21) — snížено na NÍZKOU, vědomě neopraveno:**
+
+- **Kdy nastane:** jen když broker odmítne přihlášení (rc 4/5) právě ve chvíli reconnectu.
+  Restart serveru s brokerem to nevyvolá: mosquitto (2.0.11, vestavěný `password_file`)
+  načte konfiguraci před otevřením portu, takže Pico během restartu vidí jen nedostupný
+  host / connection refused → TCP pre-test selže → běžný backoff. Nečitelný `password_file`
+  = mosquitto nenastartuje = opět jen backoff. ACL změny ani SIGHUP reload CONNECT neodmítají.
+- **Zbývající scénáře:** ruční zásah do autentizace s restartem brokeru (nedělá se),
+  auth plugin s externím backendem (nepoužívá se), migrace/reinstalace brokeru — po ní
+  krabičky ručně restartovat.
+- **WDT to nezachytí:** smyčka běží dál a krmí watchdog, `connect_mqtt()` se jen hned vrací.
+  Při výskytu: displej `E--6`, retained `offline` na status topicu, žádný diag.
+- **Pozor na opravu výše:** po L1 (v1.5.3) `connect_mqtt()` čeká jen na deadline v okně
+  `-_mqtt_backoff ≤ diff < 0`. Deadline 300 s s `_mqtt_backoff` ≤ 60 s je mimo okno a
+  vyhodnotí se jako zastaralý → pokus proběhne hned v další smyčce. Spolu s deadline je
+  nutné nastavit i `self._mqtt_backoff = 300_000`.
 
 ---
 
@@ -327,7 +344,7 @@ se zdůvodněním, aby se nálezy nevracely v dalších kolech.
 | A4 | STŘEDNÍ | `getaddrinfo()` bez uživatelského timeoutu — DNS blok až ~5s | Otevřeno |
 | A5 | ~~STŘEDNÍ~~ | Timezone mismatch Pico (local bez tz) vs. Postgres daemon (UTC s tz) | **OPRAVENO** (v1.4.0) |
 | A6 | ~~NÍZKÁ~~ | `_offset_day` inicializován z pre-NTP RTC v `__init__` | **OPRAVENO** (v1.4.0) |
-| D1 | DESIGN | `_mqtt_auth_err` zaseknutý natrvalo — reset jen rebootem | Otevřeno |
+| D1 | DESIGN | `_mqtt_auth_err` zaseknutý natrvalo — reset jen rebootem | Otevřeno, viz L4 (#8) |
 | D2 | DESIGN | Per-sensor `{topic}/status` s `retain=False` — nečitelné pro pozdější subscribery | Otevřeno |
 | D3 | DESIGN | `_uptime_s` drift — přičítá nominální `INTERVAL_S`, ne skutečný elapsed | Otevřeno |
 | D4 | DESIGN | `_pub_buffer` přístup zvenčí — encapsulation leak | Otevřeno |
