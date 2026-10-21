@@ -15,7 +15,7 @@ zdroji (micropython-lib, `umqtt.simple` 1.8.1), regrese NTP proti `git show 2955
 |----|-----------|-------|------|
 | L1 | ~~KRITICKÁ~~ | Zastaralý backoff deadline + přetečení `ticks_ms` → reconnect MQTT i ADC zablokovaný až na 6,2 dne | **OPRAVENO** (v1.5.3) |
 | L2 | ~~VYSOKÁ~~ | Regrese B1 (#3) ve v1.4.0: když je NTP nedostupné, zkouší se v **každé** smyčce (5 s blok); dvě volání v jedné iteraci = WDT reset | **OPRAVENO** (v1.5.3) |
-| L3 | VYSOKÁ | `umqtt` `wait_msg()` volá `setblocking(True)` → po prvním pingu je `settimeout(2)` pryč; zombie spojení končí WDT resetem, ne reconnectem | Otevřeno |
+| L3 | NÍZKÁ (původně VYSOKÁ) | `umqtt` `wait_msg()` volá `setblocking(True)` → po prvním pingu je `settimeout(2)` pryč; zombie spojení končí WDT resetem, ne reconnectem | Otevřeno, vědomě neopraveno (přehodnoceno 2026-10-21) |
 | L4 | STŘEDNÍ | `_mqtt_auth_err` navždy (= D1 z #6): jedno přechodné rc 4/5 od brokeru vypne MQTT až do ručního resetu | Otevřeno |
 | L5 | ~~STŘEDNÍ~~ | Před prvním úspěšným NTP se publikují časy z roku 2021 a démon je zapíše do DB | **OPRAVENO** (v1.5.3) |
 | L6 | NÍZKÁ | Únik socketu v chybové větvi `connect_mqtt()` | Otevřeno |
@@ -105,9 +105,9 @@ a na začátek `_sync_ntp()` přidat `if self.wdt: self.wdt.feed()`. To zárove�
 
 ---
 
-### L3 — `umqtt` ruší socket timeout po prvním pingu (VYSOKÁ)
+### L3 — `umqtt` ruší socket timeout po prvním pingu (NÍZKÁ, původně VYSOKÁ)
 
-**Soubor:** `main.py:281`, `main.py:318–319`
+**Soubor:** `main.py:287`, `main.py:324–325`
 
 Upstream `umqtt.simple`:
 
@@ -143,6 +143,35 @@ self.mqtt.sock.settimeout(2)    # wait_msg() volá setblocking(True) a timeout r
 
 Nejhorší případ bez krmení WDT jsou 2 × 2 s. **Ověřit:** kterou verzi `umqtt.simple` má
 firmware (frozen modul). `setblocking(True)` je ve `wait_msg()` dlouhodobě, ne jen v 1.8.1.
+
+**Přehodnocení (2026-10-21) — snížено na NÍZKOU, vědomě neopraveno:**
+
+- **Kdy nastane:** jen při zombie spojení (WiFi „připojená", k brokeru nedojde nic, ani RST),
+  které trvá déle než zaplnění TCP send bufferu. Při 2 senzorech a `INTERVAL_S = 1`
+  (~160 B/s) a `TCP_SND_BUF` řádově 11 kB (8 × MSS, neověřeno ve firmwaru) je to ~1 min.
+  Restart procesu brokeru pošle RST a L3 nevyvolá; krátký deauth/roaming AP (§3 naměřeno
+  74 s) je na hraně. Reálný scénář: výpadek serveru s brokerem nebo sítě mezi AP a
+  brokerem > 1 min. Více senzorů nebo kratší interval okno úměrně zkracuje.
+- **Dopad:** WDT reset a čistý boot. Data ze zombie období se ztratí i bez L3 (leží v TCP
+  bufferu), `_pub_buffer` je v tu chvíli prázdný. Navíc se ztratí jen hodnoty po bootu do
+  první NTP synchronizace, pokud výpadek sítě znemožní i NTP (L5: před NTP se nebufferuje).
+- **Proč neopravovat:** oprava výše mění empiricky laděné chování CYW43 (§1, §3), ladění
+  stabilního spojení s AP bylo pracné. V provozu se L3 zatím neprojevil: `uptime` v
+  `diag/*` po nasazení v1.5.3 (MS1 ráno, L200h ~12:02 UTC) bez neplánovaného restartu.
+- **Sledování:** pokles `uptime` v retained `diag/<box>` bez nasazení/odpojení = neplánovaný
+  restart. `machine.reset_cause()` by WDT od L3 neodlišil od `E--5` (`machine.reset()` jde
+  na rp2 přes watchdog), jen od výpadku napájení.
+- **Záložní oprava při výskytu (varianta A)** — vzor čtení PINGRESP zůstává beze změny,
+  socket se vrací do stavu, ve kterém je už dnes prvních ~30 s po každém connectu:
+
+  ```python
+  self.mqtt.ping()
+  self.mqtt.check_msg()           # beze změny
+  self.mqtt.sock.settimeout(2)    # check_msg() timeout ruší, obnovit
+  ```
+
+  Řeší důsledek 1 (visící `publish()` → `OSError` → `_close_mqtt()` místo WDT resetu),
+  důsledek 2 ne. Riziko: zápis zdržený > 2 s na zdravém spojení vyvolá reconnect.
 
 ---
 
