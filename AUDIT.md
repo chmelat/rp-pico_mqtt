@@ -23,7 +23,7 @@ zdroji (micropython-lib, `umqtt.simple` 1.8.1), regrese NTP proti `git show 2955
 | L8 | ~~NÍZKÁ~~ | Tlačítko trpí stejnou chybou jako L1: po více než 6,2 dne bez stisku může až 6,2 dne nereagovat | **OPRAVENO** (v1.5.3) |
 | L9 | INFO | Skryté resety WDT nejsou vidět: diag nemá `reset_cause` a démon diag zahazuje (S4) | Otevřeno |
 
-Nálezy k démonovi (B8–B10) jsou v `postgres-push/AUDIT.md`.
+Nálezy k démonovi (B8–B10) byly v `postgres-push/AUDIT.md`; démon se vede jako samostatný projekt mimo tento repozitář (soubor zůstává v git historii).
 
 ---
 
